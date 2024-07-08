@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wetty
+  labels:
+    app: wetty
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wetty
+  template:
+    metadata:
+      labels:
+        app: wetty
+    spec:
+      containers:
+      - name: wetty
+        image: wettyoss/wetty
+        args: 
+          - --ssh-host=server
+        ports:
+        - containerPort: 3000
+

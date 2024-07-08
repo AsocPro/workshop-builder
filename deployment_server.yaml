@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  labels:
+    app: server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server
+  template:
+    metadata:
+      labels:
+        app: server
+    spec:
+      containers:
+      - name: server
+        image: asocpro/sshd-base
+        imagePullPolicy: Never
+        env: 
+        # - name: SSH_USERS
+        #   value: "admin:1000:1000"
+        - name: SSH_ENABLE_PASSWORD_AUTH
+          value: "true"
+        ports:
+        - containerPort: 22
+
