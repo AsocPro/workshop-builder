@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgrest
+  labels:
+    app: postgrest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgrest
+  template:
+    metadata:
+      labels:
+        app: postgrest
+    spec:
+      containers:
+      - name: postgrest
+        image: postgrest/postgrest
+        env:
+          - name: PGRST_DB_URI
+            value: postgresql://postgres:arstneio@postgresql:5432/postgres
+          - name: PGRST_DB_SCHEMAS
+            value: api
+          - name: PGRST_DB_ANON_ROLE
+            value: web_anon
+          - name: PGRST_JWT_SECRET
+            value: CKokTO6qi5Ugr8LFNh6VvZlmiBhwUjFF
+        ports:
+          - containerPort: 3000
