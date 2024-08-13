@@ -17,5 +17,6 @@ kubectl expose -n $NAMESPACE deploy postgrest --port 3000
 kubectl expose -n $NAMESPACE deploy postgresql --port 5432
 
 
+kubectl create -f https://github.com/grafana/grafana-operator/releases/latest/download/kustomize-cluster_scoped.yaml
 
 
