@@ -6,7 +6,18 @@ The goal of this project is to make it easy to spin up environments for use in w
 This project spawned from a number of great workshops that were essentially cut short because there was so much overhead in getting the student environments created and dealing with different connectivity issues. 
 
 ## Current Features
- - This readme right here is currently the only functional part of this project. 
+ - This readme right here is currently the only production ready part of this project. 
+
+## Current Prototype Features
+ - Initial services setup can be done with the setup.sh shell script.
+ - The commands.sh shell script takes one argument to create a new namespace/student environment.
+   - Student environments consist of a server and a wetty interface for the student to interface with the server.
+
+## Protoptype todos
+ - Incoorperate state management with persistent volumes.
+ - Report state to the postgresql server.
+ - Show state in Grafana dashboard for instructor.
+ - Show state to student by modifying the prompt.
 
 ## Planned features
  - Easily provide student environments where all of the necessary tools are pre-installed; no wasted time on creating accounts, compiling or installing extra packages.  They just log in and go.
