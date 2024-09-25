@@ -20,6 +20,14 @@ kubectl apply -n $NAMESPACE -f ${NAMESPACE}_ingress.yaml
 kubectl expose -n $NAMESPACE deploy wetty --port 3000
 
 
+cp pv.yaml ${NAMESPACE}_pv.yaml
+sed -i "s/%%NAMESPACE%%/${NAMESPACE}/g" ${NAMESPACE}_pv.yaml
+kubectl apply -n ${NAMESPACE} -f ${NAMESPACE}_pv.yaml
+
+cp pvc.yaml ${NAMESPACE}_pvc.yaml
+sed -i "s/%%NAMESPACE%%/${NAMESPACE}/g" ${NAMESPACE}_pvc.yaml
+kubectl apply -n ${NAMESPACE} -f ${NAMESPACE}_pvc.yaml
+
 
 
 kubectl apply -n $NAMESPACE -f deployment_server.yaml

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: %%NAMESPACE%%-pv
+  labels:
+    pv-ns: %%NAMESPACE%%
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: 
+    - ReadWriteOncePod
+  hostPath:
+    path: /opt/storage/%%NAMESPACE%%
+    type: DirectoryOrCreate
