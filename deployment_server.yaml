@@ -16,8 +16,8 @@ spec:
     spec:
       containers:
       - name: server
-        image: shell-tutor
-        imagePullPolicy: Never
+        image: asocpro/shell-tutor-ssh
+        #imagePullPolicy: Never
         env: 
         # - name: SSH_USERS
         #   value: "admin:1000:1000"
