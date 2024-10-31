@@ -31,6 +31,8 @@ kubectl create -f https://github.com/grafana/grafana-operator/releases/latest/do
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
 helm install -n grafana --values loki-values.yaml loki grafana/loki
+helm install -n grafana --values promtail-values.yaml promtail grafana/promtail
 
 kubectl apply -n grafana -f loki-grafana-datasource.yaml 
+kubectl apply -f grafana-dashboard.yaml -n grafana
 
