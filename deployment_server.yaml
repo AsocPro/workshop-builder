@@ -16,21 +16,73 @@ spec:
     spec:
       containers:
       - name: server
-        image: asocpro/shell-tutor-ssh
+        image: asocpro/shell-tutor-ssh:0.11
         #imagePullPolicy: Never
         env: 
         # - name: SSH_USERS
         #   value: "admin:1000:1000"
           - name: SSH_ENABLE_PASSWORD_AUTH
             value: "true"
+          - name: LOG_FILE_DIR
+            value: "/opt/progress/logr"
         ports:
           - containerPort: 22
         volumeMounts:
-          - mountPath: /opt/storage
+          - mountPath: /opt/progress
+            name: mount-storage-pvc
+      - name: tail
+        image: grafana/promtail
+        args:
+          - "-config.file=/etc/promtail/promtail.yaml"
+        #imagePullPolicy: Never
+        volumeMounts:
+          - mountPath: /etc/promtail
+            name: promtail-config
+          - mountPath: /opt/progress
             name: mount-storage-pvc
       volumes:
+        - name: promtail-config
+          configMap:
+            name: promtail-cm
         - name: mount-storage-pvc
           persistentVolumeClaim:
             claimName: storage-pvc
+
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-cm
+  labels:
+    app: promtail
+data:
+  promtail.yaml: |
+    positions:
+      filename: /opt/promtail-positions.yaml
+    clients:
+      - url:  http://loki-gateway.grafana.svc.cluster.local/loki/api/v1/push
+        tenant_id: 1
+    scrape_configs:
+      - job_name: session-logs
+        static_configs:
+          - targets:
+            - localhost
+            labels:
+              job: session-logs
+              __path__: /opt/progress/*session.log
+      - job_name: completion-logs
+        static_configs:
+          - targets:
+            - localhost
+            labels:
+              job: completion-logs
+              __path__: /opt/progress/*.sh
+        pipeline_stages:
+          - logfmt:
+              mapping:
+                step:
+                completion-status:
+
 
 
