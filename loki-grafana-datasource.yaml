@@ -17,4 +17,5 @@ spec:
       httpHeaderValue1: '1'
     name: loki-ds-name
     type: loki
-    url: "http://loki:3100"
+    url: "http://loki-gateway.grafana.svc.cluster.local/"
+    access: proxy
