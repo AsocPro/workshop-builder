@@ -21,3 +21,5 @@ while inotifywait -e modify /opt/storage; do
 
 done
 
+k3d image import shell-tutor:latest  --cluster wb
+
