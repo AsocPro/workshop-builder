@@ -11,3 +11,13 @@ using a local image cache for the docker containers.
 
 https://community.grafana.com/t/public-dashboard-grafana-in-external-link-without-login-tutorial/59221
 k3d image import rtop --cluster wb
+
+
+root@monitor-57967545dc-n49jk:/opt/shell-tutor# cat /opt/checkStorage.sh 
+#!/bin/bash
+
+while inotifywait -e modify /opt/storage; do 
+  ls /opt/storage
+
+done
+
