@@ -73,7 +73,26 @@ TODO: Define the available resource classes and their concrete quota/limit value
 | `webTerminal` | bool | Enable browser-based terminal |
 | `codeServer` | bool | Enable VS Code in browser |
 
-TODO: Define how access surfaces are implemented (sidecars? ingress rules? services?).
+Terminal access is intentionally excluded from `docker-compose.yml` — it is a platform concern declared here, not an author concern. The platform injects the terminal mechanism (exec proxy or sidecar); authors just declare that they need it and which service to target.
+
+Proposed schema for terminal access:
+
+```yaml
+access:
+  terminal:
+    enabled: true
+    target: web   # must match a service name in docker-compose.yml
+```
+
+TODO: Define how access surfaces are implemented — options are:
+- Exec proxy through the platform backend (WebSocket → docker exec / kubectl exec). No extra container, but backend must handle terminal sessions.
+- Injected sidecar (e.g., ttyd) alongside the target container. Simpler backend, extra container overhead.
+
+TODO: Decide whether `webTerminal` is the right field name or whether `terminal` with a nested `target` is clearer.
+
+TODO: Define what happens when `terminal.target` references a service not present in the compose file — validation error at compile time.
+
+TODO: Define whether multiple terminal targets are supported in v1 or single target only.
 
 ## Relationship to Compose
 

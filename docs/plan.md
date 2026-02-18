@@ -14,10 +14,10 @@ These are the foundation. Everything downstream — types, CRDs, operator behavi
 
 The Compose subset you support is the single most consequential input decision. It determines what the shared library parses, what translation rules exist, what the CRDs contain, and what the operator deploys.
 
-- [ ] Define the exact subset of Compose features the platform supports. Document which features are intentionally excluded and why.
-- [ ] Document how Compose services map to Kubernetes objects (Deployments, Services, PVCs, etc.) during translation in the shared library.
-- [ ] Define specific validation rules and error messages.
-- [ ] Add example `docker-compose.yml` files for common workshop patterns (single container, multi-service, with volumes, etc.).
+- [x] Define the exact subset of Compose features the platform supports. Document which features are intentionally excluded and why.
+- [x] Document how Compose services map to Kubernetes objects (Deployments, Services, PVCs, etc.) during translation in the shared library.
+- [x] Define specific validation rules and error messages.
+- [x] Add example `docker-compose.yml` files for common workshop patterns (single container, multi-service, with volumes, etc.).
 
 **Think about:** What's the simplest Compose subset that covers 90% of workshop needs? What Compose features would create translation nightmares (networks, build, deploy, configs/secrets)?
 
