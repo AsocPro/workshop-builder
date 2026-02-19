@@ -25,6 +25,19 @@ The GUI **must**:
 
 The GUI is a presentation layer over the same core logic the CLI uses.
 
+## Local Mode Client
+
+The Wails app is a strong candidate for the local mode client — the environment students use to run workshops on their own machine without a cluster. In this role the Wails app would:
+
+- Spawn and manage workshop containers (Docker or Podman)
+- Spawn ttyd as a subprocess for terminal access
+- Run an HTTP/WebSocket proxy server in the Go backend, proxying all browser connections (including ttyd WebSocket) through a single origin to avoid CORS issues
+- Serve the web UI from the embedded WebView
+
+This keeps local mode as a single distributable binary with no "open a browser and navigate to localhost" step for students. The Go backend in the Wails app has direct access to the container runtime and can manage the full workshop lifecycle.
+
+TODO: Confirm whether the Wails app is the local mode client, a standalone admin GUI, or both. Decide before frontend implementation begins.
+
 ## Relationship to CLI
 
 TODO: Define whether the GUI calls CLI commands as subprocesses, imports CLI logic as Go packages, or shares a common service layer.

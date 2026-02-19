@@ -27,11 +27,11 @@ The Compose subset you support is the single most consequential input decision. 
 
 This defines every platform behavior knob. The CRD schema is essentially a Kubernetes-native representation of this file, so it needs to be locked down before CRD work.
 
-- [ ] Define team membership model — how are teams defined and assigned?
-- [ ] Define the available resource classes and their concrete quota/limit values.
-- [ ] Define how access surfaces are implemented (sidecars? ingress rules? services?).
-- [ ] Define validation rules (e.g., team mode requires cluster backend, ttl requires ephemeral mode, etc.).
-- [ ] Define how the workspace.yaml schema will be versioned over time.
+- [x] Define team membership model — how are teams defined and assigned? (deferred; individual mode only for v1, team mode schema reserved for future)
+- [x] Define the available resource classes and their concrete quota/limit values. (replaced with explicit cpu/memory fields; defaults deferred)
+- [x] Define how access surfaces are implemented (sidecars? ingress rules? services?). (webTerminal via ttyd, proxied through backend; cluster injection details deferred to operator)
+- [x] Define validation rules (e.g., team mode requires cluster backend, ttl requires ephemeral mode, etc.). (minimal validation defined)
+- [x] Define how the workspace.yaml schema will be versioned over time. (top-level `version: v1` field; unrecognized version is a hard validation error)
 
 **Think about:** What's the minimal set of fields for v1? Which fields can be added later without breaking the schema? Are resource classes just T-shirt sizes or something more flexible?
 
