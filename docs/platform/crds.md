@@ -14,15 +14,15 @@ Cluster-level reusable workspace definition. Represents a workshop's infrastruct
 
 ### Contains
 
-- Parsed Compose topology (translated to K8s specs)
 - Workspace metadata defaults (from `workspace.yaml`)
-- Resource class assignment
+- Resource configuration
 - Access surface configuration
-- Workshop step definitions (compiled artifact references)
+- Workshop step definitions (OCI image tags from SQLite)
+- Image pull secrets
 
 ### Lifecycle
 
-- **Created by:** CLI (or future API)
+- **Created by:** CLI (reads SQLite image tags; generates CRD via [Shared Go Library](./shared-go-library.md))
 - **Consumed by:** Operator
 - **Scope:** Cluster-scoped (available across namespaces)
 
@@ -34,11 +34,6 @@ kind: WorkspaceTemplate
 metadata:
   name: kubernetes-101
 spec:
-  workload:
-    containers: [...]
-    volumes: [...]
-    services: [...]
-
   defaults:
     lifecycle:
       mode: ephemeral
@@ -48,23 +43,29 @@ spec:
     cluster:
       mode: none
     resources:
-      class: workshop-small
+      cpu: "500m"
+      memory: "512Mi"
     access:
-      ssh: true
       webTerminal: true
 
+  imagePullSecrets:
+    - name: registry-credentials
+
   steps:
-    - name: step-1-intro
-      manifestBundle: <ref or inline>
-      fileArchive: <ref or inline>
-    - name: step-2-deploy
-      manifestBundle: <ref or inline>
-      fileArchive: <ref or inline>
+    - id: step-1-intro
+      title: "Introduction"
+      imageTag: myorg/kubernetes-101:step-1-intro
+      imageDigest: myorg/kubernetes-101:step-1-intro-sha256-abc123
+
+    - id: step-2-deploy
+      title: "Deploy the App"
+      imageTag: myorg/kubernetes-101:step-2-deploy
+      imageDigest: myorg/kubernetes-101:step-2-deploy-sha256-def456
 ```
 
-TODO: Finalize the CRD schema. Define which fields are overridable at instance level vs locked at template level.
+`steps[].imageTag` and `steps[].imageDigest` are populated from the SQLite artifact by the CLI at template creation time. The operator reads these to perform step transitions — no manifest bundles or file archives are referenced.
 
-TODO: Define how compiled step artifacts are referenced — inline in CRD? ConfigMap references? External storage references?
+TODO: Finalize the CRD schema. Define which fields are overridable at instance level vs locked at template level.
 
 ---
 
@@ -113,7 +114,6 @@ status:
   startedAt: "2026-01-15T10:00:00Z"
   expiresAt: "2026-01-15T14:00:00Z"
   accessEndpoints:
-    ssh: ws-kubernetes-101-student-42.example.com:22
     webTerminal: https://ws-kubernetes-101-student-42.example.com/terminal
   conditions: [...]
 ```

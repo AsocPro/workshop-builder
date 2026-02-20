@@ -51,7 +51,7 @@ Operator detects cluster.mode == per-workspace in WorkspaceInstance
 
 ## Key Constraint
 
-Cluster provisioning is **never** expressed in `docker-compose.yml`. It is infrastructure orchestration logic that lives in the CLI and Operator.
+Cluster provisioning is **never** expressed in `step-spec.yaml`. It is infrastructure orchestration logic that lives in the CLI and Operator.
 
 ## Version Management
 

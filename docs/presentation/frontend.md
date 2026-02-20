@@ -43,16 +43,16 @@ Workshop instructors creating or editing workshops.
 
 ### Features
 
-- Step list editor (add, remove, reorder steps)
-- Save step snapshot (trigger [authoring snapshot](../definition/authoring.md) capture)
-- Compile workshop (trigger [compilation](../artifact/compilation.md))
+- Step list editor (add, remove, reorder steps in `step-spec.yaml`)
+- Start authoring proxy session (launch `workshop build proxy`)
+- Save step (trigger `workshop build step save`)
+- Compile workshop (trigger `workshop build compile`)
 - Export [SQLite artifact](../artifact/sqlite-artifact.md)
 - Optional YAML import/export
-- Optional diff viewer (show changes between steps)
 
 ### Key Constraint
 
-Builder mode may interact with live Kubernetes namespaces. It does NOT change the runtime architecture — builder mode is a client of the [Authoring Layer](../definition/authoring.md).
+Builder mode is a client of the [CLI build commands](../platform/cli.md) — it does not interact with live Kubernetes namespaces. All authoring state lives in `step-spec.yaml` and the local Docker environment.
 
 TODO: Define how builder mode connects to the authoring namespace — direct K8s API? Through the CLI? Through a backend service?
 

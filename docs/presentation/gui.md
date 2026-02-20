@@ -29,8 +29,10 @@ The GUI is a presentation layer over the same core logic the CLI uses.
 
 The Wails app is a strong candidate for the local mode client — the environment students use to run workshops on their own machine without a cluster. In this role the Wails app would:
 
-- Spawn and manage workshop containers (Docker or Podman)
-- Spawn ttyd as a subprocess for terminal access
+- Pull step images from the registry (using image tags from SQLite)
+- Spawn and manage workshop containers (Docker or Podman) running step images
+- Perform step transitions by stopping the current container and starting the next step image
+- Spawn ttyd as a subprocess for terminal access to the current step container
 - Run an HTTP/WebSocket proxy server in the Go backend, proxying all browser connections (including ttyd WebSocket) through a single origin to avoid CORS issues
 - Serve the web UI from the embedded WebView
 

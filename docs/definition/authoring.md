@@ -1,69 +1,83 @@
-# Authoring — Builder Mode
+# Authoring — CLI Proxy Model
 
 ## Purpose
 
-Provide instructors with a natural, incremental workflow for building workshops. This is the "messy" side of the system — mutation, iteration, and experimentation happen here so that the [compiled artifacts](../artifact/compilation.md) and runtime can remain clean and deterministic.
+Provide instructors with a natural, incremental workflow for building workshops. Authoring produces a `step-spec.yaml` that records *intent* — the files, environment variables, and commands that define each step — rather than capturing live infrastructure state.
 
 ## Environment
 
-- Uses a **live Kubernetes namespace**
-- Uses **real PVCs and file systems**
-- Allows direct `kubectl` and file manipulation
-- Supports step-based snapshot capture
-- State is mutable and layered
+- Uses a **local container** (Docker or Podman)
+- The `workshop build proxy` command wraps the container shell
+- The proxy observes changes and writes them to `step-spec.yaml`
+- No live Kubernetes cluster required for authoring
 
 ## Authoring Workflow
 
 ```
-1. Instructor begins Step 1
-2. Mutates cluster state and files
-3. Clicks "Save Step" → authoring snapshot captured
-4. Continues to Step 2
-5. Mutates further
-6. Saves again → snapshot captured
-7. Repeat for all steps
-```
+1. Run: workshop build proxy
+   → Container launched from base image (or last step image)
 
-Each step snapshot implicitly inherits all previous state during authoring. The instructor works incrementally — they don't need to rebuild from scratch for each step.
+2. Work inside the container:
+   → Create/edit files
+   → Set environment variables
+   → Run commands
+
+3. CLI proxy observes and records to step-spec.yaml:
+   → File diffs → files: entries
+   → Env changes → env: entries
+   → Commands run → commands: entries
+
+4. Run: workshop build step save
+   → Current step finalized in step-spec.yaml
+   → Proxy opens next step container (built on top of current)
+
+5. Continue for all steps
+
+6. Run: workshop build compile
+   → Dagger builds one OCI image per step
+   → Images pushed to registry
+   → SQLite updated with image tags
+```
 
 ## Key Properties
 
-- **Incremental:** Each step builds on the previous one
-- **Mutable:** The instructor can freely modify the environment
-- **Live:** Real cluster, real files, real tools
-- **Non-deterministic:** The authoring environment carries forward all accumulated state and side effects
+- **Records intent, not observed state.** The proxy records what the author *did* — files written, commands run — not a snapshot of the full filesystem. This keeps `step-spec.yaml` human-readable and version-controllable.
+- **Incremental.** Each step's proxy session builds on top of the previous step's image. The instructor works forward naturally.
+- **No live cluster required.** Authoring is purely local container work. Kubernetes is not involved.
+- **Version-controllable.** `step-spec.yaml` and local source files are the complete authoring artifact. Commit them to Git like any other source code.
 
-These properties are intentional. Authoring complexity is absorbed here so that [compilation](../artifact/compilation.md) can flatten it into clean runtime artifacts.
+## What the Proxy Records
 
-## Authoring Snapshots
+| Author Action | Recorded In step-spec.yaml |
+|---|---|
+| Create or edit a file | `files:` entry with `path` and `content` (or `source` if from local disk) |
+| Set an environment variable | `env:` key/value entry |
+| Run a shell command | `commands:` list entry |
+| Delete a file | `files:` entry with `content: ""` (empty file) or explicit deletion command |
 
-When the instructor saves a step, the system captures:
-
-- Current Kubernetes manifest state in the namespace
-- Current file/PVC contents
-- Educational metadata (step title, markdown content, validation rules)
-
-These snapshots are:
-
-- **Internal to builder mode** — never exposed to students
-- **Incremental and layered** — each builds on previous state
-- **Input to compilation** — consumed by the [Compilation Layer](../artifact/compilation.md)
-- **Not included in the final SQLite artifact** — only compiled output ships
-
-TODO: Define exactly what is captured during a snapshot — full namespace dump? Specific resource types? How are system-level resources excluded?
-
-TODO: Define how the instructor specifies which resources and files belong to a step vs platform internals.
-
-TODO: Are authoring snapshots preserved for re-editing after compilation, or are they discarded? If preserved, where are they stored?
+The proxy does not record platform internals, system files, or ephemeral process state — only changes the author makes explicitly.
 
 ## Step Editing
 
-TODO: Define how instructors edit or re-order existing steps. Can they insert a step between existing steps? Delete a step? What happens to downstream steps?
+To edit a step after it has been finalized:
 
-## Collaboration
+1. Edit `step-spec.yaml` directly — add, remove, or change `files`, `env`, or `commands` entries
+2. Run `workshop build compile --from-step <id>` to rebuild from the edited step forward
 
-TODO: Define whether multiple instructors can collaborate on authoring simultaneously.
+Steps are YAML text. No special tooling is needed to edit them.
+
+## Step Reordering
+
+To reorder steps, edit the `steps:` list in `step-spec.yaml` and reorder the entries. Run `workshop build compile` to rebuild all affected steps.
 
 ## Version Control Integration
 
-Authoring snapshots can optionally be exported to a Git-compatible format. See [SQLite Artifact](../artifact/sqlite-artifact.md) for the YAML export/import workflow.
+`step-spec.yaml` is the version-controllable source of truth for a workshop. Commit it to Git along with any local source files referenced by `files[].source` entries.
+
+Unlike the previous snapshot-based model, there is no binary authoring state to manage. The full workshop definition is human-readable text. Branching, diffing, pull requests, and code review work naturally.
+
+## Collaboration
+
+Multiple instructors can collaborate by editing `step-spec.yaml` in a shared Git repository. The normal Git workflow applies: branch, commit, review, merge.
+
+TODO: Define whether simultaneous proxy sessions from multiple authors are supported — i.e., can two authors build proxy sessions concurrently against different steps?

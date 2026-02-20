@@ -20,7 +20,8 @@ The platform supports two backends with intentionally different capability sets.
 | Nested cluster (vcluster) | No | Yes |
 | OIDC integration | No | Yes |
 | Batch provisioning | Limited | Full |
-| Step transitions / reset | TODO | Full (Operator-managed) |
+| Step transitions / reset | Image swap (CLI-managed) | Image swap (Operator-managed) |
+| Dagger build pipeline | Yes (local Docker) | Yes (local Docker, pre-deploy) |
 
 ## Design Rationale
 
@@ -48,5 +49,3 @@ The platform explicitly does NOT attempt to:
 - Make Docker behave like Kubernetes
 
 TODO: Define the exact validation error messages for each unsupported capability per backend.
-
-TODO: Define how step transitions work in local/Docker mode — simplified version of the operator's reset flow run by the CLI?

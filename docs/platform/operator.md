@@ -13,10 +13,9 @@ The authoritative multi-tenant lifecycle engine. The Operator is the only compon
 | LimitRange | Default container resource constraints |
 | RBAC bindings | Scope user/service account permissions |
 | NetworkPolicy | Optional network isolation between workspaces |
-| PVCs | Persistent storage for workspace data |
-| Deployments | Workload containers (from translated Compose) |
-| Services | Internal and external networking |
-| Access sidecars | SSH, web terminal, code-server containers |
+| Deployment | Workload container (current step's OCI image) |
+| Service | Internal and external networking |
+| Access sidecars | Web terminal (ttyd) container |
 | vcluster | Nested Kubernetes cluster (if `cluster.mode == per-workspace`) |
 
 ## Lifecycle Management
@@ -31,27 +30,28 @@ The authoritative multi-tenant lifecycle engine. The Operator is the only compon
 The operator owns the step transition flow. When a student moves to Step N:
 
 ```
-1. Delete namespace contents (excluding platform system components)
-2. Recreate or clean the namespace
-3. Apply compiled manifest bundle for Step N
-4. Replace PVC/file contents with compiled file state
+1. Resolve image tag for Step N from WorkspaceTemplate spec
+2. Update Deployment spec: set image to Step N's imageTag
+3. Wait for Deployment rollout to complete
+4. Update WorkspaceInstance status (currentStep = N)
 5. Update educational state
-6. Update WorkspaceInstance status (currentStep = N)
 ```
+
+This is an image swap. The running container is replaced by a new container running the Step N image. No namespace teardown, no PVC restoration, no manifest bundle application.
 
 ### Reset Rules
 
-- **Jumping to any step = full clean reset.** Always.
-- **All previous student mutations are erased.** No residual state.
+- **Jumping to any step = image swap.** Always.
+- **All previous student mutations to the container filesystem are replaced** by the immutable step image. No residual state survives.
 - **No incremental patching.** No diffs applied.
 - **No mutation replay.** No step history interpreted.
-- **Only declarative reconciliation.** Apply desired state from [compiled artifacts](../artifact/compilation.md).
+- **Determinism is guaranteed by OCI image immutability.** The same image tag always produces the same container state.
 
 This guarantees:
 
 - Deterministic student experience
 - Simplified debugging (state is always known)
-- Simplified validation (expected state = compiled state)
+- Simplified validation (expected state = image contents)
 - No cascading corruption from student mistakes
 
 ### Kubernetes State Strategy
@@ -60,18 +60,12 @@ This guarantees:
 - Full cluster backups (Velero-level restore)
 - Patch replay chains
 - Manifest diffs at runtime
-- Layered infrastructure replay
+- Namespace teardown and rebuild per step transition
 
 **Chosen approach:**
-- Store full desired state per step (from compilation)
-- Runtime deletes and reapplies
+- Store complete step state in OCI images (built at compile time)
+- Step transition = Deployment image update + rollout wait
 - Determinism over cleverness
-
-### File and PVC Strategy
-
-- Each compiled step contains full file state
-- Runtime replaces PVC contents completely
-- No incremental mutation at runtime
 
 ### Runtime Snapshots
 
@@ -81,19 +75,20 @@ The operator tracks student progress as logical checkpoints:
 - Completion markers
 - Optional student-specific notes or answers
 
-These are **educational state only** — not infrastructure diffs. Cluster state at any point is reconstructed from compiled artifacts, never from snapshots.
+These are **educational state only** — not infrastructure diffs. Container state at any point is reconstructed from the OCI image, never from snapshots.
 
 TODO: Define retention policy for runtime snapshots — how many are kept? Per student? Per step?
 
 ## What It Does NOT Do
 
-- Parse Compose files directly (receives parsed/translated spec via [CRD](./crds.md))
+- Parse `step-spec.yaml` directly (receives image tags via [CRD](./crds.md))
 - Handle local mode (that's [CLI](./cli.md)-only)
 - Implement GUI or frontend logic
+- Restore PVC contents on step transition (there are no per-step PVC archives)
 
 ## Platform System Components
 
-TODO: Define what "platform system components" are excluded from namespace cleanup during step transitions — the runtime agent? monitoring sidecars? access proxies?
+TODO: Define what "platform system components" are excluded from namespace cleanup — the runtime agent? monitoring sidecars? access proxies?
 
 ## Reconciliation Loop
 
@@ -101,11 +96,11 @@ TODO: Define the reconciliation flow for WorkspaceTemplate and WorkspaceInstance
 
 ## Error Handling
 
-TODO: Define how the operator handles partial failures (e.g., namespace created but deployment failed), and what happens if a step transition partially fails (manifest applies but PVC restore fails).
+TODO: Define how the operator handles partial failures (e.g., namespace created but Deployment update failed, rollout stalled).
 
 ## Transition Performance
 
-TODO: Define acceptable step transition times. What optimizations are available (parallel apply, pre-staging)?
+TODO: Define acceptable step transition times. A Deployment image update and rollout is typically faster than a full namespace teardown+rebuild. Quantify expected transition latency.
 
 ## Scaling
 

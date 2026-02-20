@@ -1,75 +1,110 @@
-# Compilation Layer
+# Compilation Layer — Dagger Build Pipeline
 
 ## Purpose
 
-Transform incremental [authoring snapshots](../definition/authoring.md) into deterministic, self-contained runtime artifacts. This is conceptually similar to container image flattening after layered builds.
+Transform a [`step-spec.yaml`](../definition/step-spec.md) and local source files into a set of tagged OCI images and an updated [SQLite artifact](./sqlite-artifact.md). Each step becomes one immutable image. The SQLite file records educational metadata and image references.
 
 ## Input
 
-- Authoring snapshots (one per step)
-- Markdown content
-- Workshop metadata
+- `step-spec.yaml` (validated by [Shared Go Library](../platform/shared-go-library.md))
+- Local source files referenced by `files[].source` entries
+- Registry credentials (for pushing images)
 
-## Output (Per Step)
-
-Each compiled step is **fully self-contained** and includes:
+## Output
 
 | Artifact | Description |
 |---|---|
-| Kubernetes manifest bundle | Full desired state, normalized |
-| File state archive | Complete file/PVC contents (e.g., tar blob) |
-| Educational state snapshot | Step metadata, validation rules, markdown |
+| Tagged OCI images | One image per step, pushed to a container registry |
+| Updated SQLite | Educational metadata + image tags/digests per step |
+
+The `step-spec.yaml` and local source files are **not** distributed — only the SQLite file and the images in the registry are needed at runtime.
 
 ## Key Properties
 
-- **No diffs.** Each step contains complete state.
-- **No patch chains.** No step depends on a previous step's output.
-- **No mutation replay.** Runtime never needs to understand what changed between steps.
-- **Deterministic.** Applying a compiled step always produces the same result.
+- **No diffs.** Each step image contains complete cumulative state.
+- **No patch chains.** No step depends on a previous step at runtime — the image is the state.
+- **Deterministic.** Building from the same `step-spec.yaml` produces the same image content (modulo base image changes).
+- **Incrementally cacheable.** Dagger layer caching skips unchanged steps automatically.
 
-## Manifest Normalization
+## Dagger Pipeline
 
-During compilation, Kubernetes manifests are normalized:
-
-- Strip `status` fields
-- Strip generated fields (`resourceVersion`, `uid`, `creationTimestamp`, etc.)
-- Strip cluster-specific annotations
-- Retain only the desired state
-
-This ensures manifests are portable and reapplicable.
-
-## Flattening Process
+The CLI invokes a Dagger pipeline that builds steps sequentially:
 
 ```
-Authoring snapshot for Step 3
-  (which accumulated state from Steps 1 + 2 + 3)
-                  |
-             Compilation
-                  |
-         Compiled Step 3 artifact
-         (complete, standalone state)
+base.image (from step-spec.yaml)
+      │
+      ▼
+Step 1 build:
+  FROM base.image
+  → COPY / write files (from files[] entries)
+  → ENV (from env map)
+  → RUN commands (from commands[])
+  → push as <workshop.image>:<step-1-id>
+  → push as <workshop.image>:<step-1-id>-<short-digest>
+      │
+      ▼
+Step 2 build:
+  FROM <workshop.image>:<step-1-id>
+  → COPY / write files
+  → ENV
+  → RUN commands
+  → push as <workshop.image>:<step-2-id>
+  → push as <workshop.image>:<step-2-id>-<short-digest>
+      │
+      ▼
+      ...
+      │
+      ▼
+Step N pushed → SQLite updated with all image tags and digests
 ```
 
-The compilation process captures the **total accumulated state** at each step point and packages it as a standalone artifact. The incremental authoring history is discarded.
+OCI layer inheritance replaces snapshot flattening. Each step image is the complete accumulated state at that point — no runtime computation of diffs between steps is needed.
 
-## Output Destination
+## Incremental Rebuilds
 
-Compiled artifacts are stored in the [SQLite Artifact](./sqlite-artifact.md).
+The `--from-step <id>` flag starts the pipeline at a specific step, treating all preceding step images as already built. Only the specified step and all steps after it are rebuilt.
 
-TODO: Define the serialization format for each artifact type (manifest bundle format, archive format, educational snapshot format).
+```
+workshop build compile --from-step step-3-advanced
+```
+
+Steps before `step-3-advanced` retain their existing tags in SQLite. Steps from `step-3-advanced` onward are rebuilt and their SQLite rows updated.
+
+Dagger's own layer cache provides a second level of incrementality: if a step's inputs (files, env, commands, and parent image) are unchanged, Dagger skips the rebuild entirely even without `--from-step`.
+
+## SQLite Update
+
+After all images are pushed, the pipeline writes to the SQLite artifact:
+
+- For each step: `image_tag` and `image_digest` columns in the `steps` table
+- Workshop-level metadata row in the `workshop` table (if not already present)
+
+Educational metadata (step titles, markdown, validation rules) is written separately — either authored manually in the YAML export format and imported, or set via the CLI/GUI authoring tools.
 
 ## Validation During Compilation
 
-TODO: Define what validation occurs during compilation — manifest validity, file completeness, step ordering, etc.
+Before the Dagger build starts, the shared library validates the `step-spec.yaml`:
+
+- Schema validation (required fields, type correctness, URL-safe IDs)
+- Source file existence (all `files[].source` paths exist on disk)
+- Step ordering (IDs are unique, at least one step present)
+
+Validation errors abort the pipeline before any images are built.
+
+TODO: Define what additional validation occurs during the build — e.g., whether RUN command failures abort the pipeline or are reported as warnings.
 
 ## Recompilation
 
-TODO: Define when and how recompilation is triggered — manual only? Automatic on step save? Incremental recompilation of changed steps only?
+Recompilation is triggered manually by running `workshop build compile`. It is not automatic.
 
-## Size Considerations
+Use `--from-step <id>` for incremental rebuilds when only later steps have changed.
 
-Because each step stores complete state (not diffs), storage grows linearly with steps and state size. This is an accepted tradeoff:
+## Size Expectations
 
-> Storage cost is acceptable; operational complexity is not.
+Because each step image is a complete layer stack (not a diff), storage in the registry grows with step count and base image size. For a typical workshop with 10 steps on an `ubuntu:22.04` base:
 
-TODO: Provide rough size estimates for typical workshops (e.g., 10 steps, 5 services, moderate file state).
+- Each step adds only its changed files and build outputs as new layers
+- OCI layer deduplication in the registry minimizes actual storage
+- Unchanged layers are shared across all step images
+
+The SQLite artifact is small regardless of step count — it contains only metadata and image references, not image data. Typical workshops: **under 5MB** for the SQLite file.

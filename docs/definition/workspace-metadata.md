@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines platform-level semantics that govern how a workspace is provisioned, isolated, lifecycled, and accessed. This is the counterpart to `docker-compose.yml` — Compose says **what runs**, `workspace.yaml` says **how it runs**.
+Defines platform-level semantics that govern how a workspace is provisioned, isolated, lifecycled, and accessed. This is the counterpart to `step-spec.yaml` — the step spec says **what the container images contain**, `workspace.yaml` says **how workspaces run**.
 
 ## Conceptual Structure
 
@@ -28,7 +28,6 @@ resources:
 access:
   webTerminal:
     enabled: true
-    target: app
 ```
 
 ## Field Definitions
@@ -87,16 +86,14 @@ This section is deferred until core functionality is complete. The field is pres
 | Field | Type | Description |
 |---|---|---|
 | `webTerminal.enabled` | bool | Enable browser-based terminal via ttyd |
-| `webTerminal.target` | string | Service name from `docker-compose.yml` to attach the terminal to |
 
 ```yaml
 access:
   webTerminal:
     enabled: true
-    target: db   # service name from docker-compose.yml — which container to open a shell into
 ```
 
-`target` must match a service name defined in the companion `docker-compose.yml`. This allows authors to point the terminal at any specific container in a multi-service workshop (e.g. attaching to the database rather than the app). Validation at compile time will reject a `target` that does not match a defined service.
+The terminal always attaches to the current step's running container. No `target` field is needed — there is only one container per step (the step's OCI image). When the student advances to the next step, the terminal reconnects to the new container automatically.
 
 `webTerminal` is the only access surface for v1. SSH access and browser-based code editors (e.g. code-server) are out of scope for v1 and intentionally omitted to avoid premature complexity.
 
@@ -108,16 +105,16 @@ access:
 
 **Local mode:** ttyd and the platform backend run as native processes spawned by the CLI binary — not as containers. This avoids any container socket dependency and ensures compatibility with both Docker and Podman. Podman is daemonless and does not expose a socket by default, so mounting a socket into a container is not a portable solution. The CLI detects which container runtime is available and invokes the appropriate exec command (`docker exec` or `podman exec`).
 
-TODO: Determine the exact mechanism for ttyd to access the target container shell in cluster mode — sidecar with shared process namespace, nsenter, or other approach. Defer to operator implementation.
+TODO: Determine the exact mechanism for ttyd to access the current step container shell in cluster mode — sidecar with shared process namespace, nsenter, or other approach. Defer to operator implementation.
 
 TODO: Define how the CLI detects and selects between Docker and Podman runtimes in local mode.
 
-## Relationship to Compose
+## Relationship to step-spec.yaml
 
-`workspace.yaml` is logically paired with `docker-compose.yml`. Together they form a complete workspace definition:
+`workspace.yaml` is logically paired with `step-spec.yaml`. Together they form a complete workshop definition:
 
-- Compose = workload topology
-- workspace.yaml = platform behavior
+- `step-spec.yaml` = what the step container images contain (files, env, commands)
+- `workspace.yaml` = platform behavior (lifecycle, isolation, access)
 
 They are separate files to maintain separation of concerns.
 
@@ -139,10 +136,7 @@ Validation is intentionally minimal for v1. The shared library enforces the foll
 | `isolation.mode` is not `individual` or `team` | `isolation.mode: must be "individual" or "team"` |
 | `cluster.mode` is not `none`, `per-workspace`, or `shared` | `cluster.mode: must be "none", "per-workspace", or "shared"` |
 | `lifecycle.ttl` is set but not a valid duration string | `lifecycle.ttl: invalid duration format` |
-| `access.webTerminal.enabled` is true but `target` is missing | `access.webTerminal.target: required when webTerminal is enabled` |
-| `access.webTerminal.target` does not match a service name in `docker-compose.yml` | `access.webTerminal.target: "<name>" is not a service defined in docker-compose.yml` |
-
-The last rule is the only cross-file validation — all others are self-contained within `workspace.yaml`.
+All validation rules are self-contained within `workspace.yaml`. There is no cross-file validation against `step-spec.yaml`.
 
 ## Schema Versioning
 
