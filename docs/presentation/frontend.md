@@ -1,60 +1,38 @@
-# Frontend Architecture
+# Frontend — Student Web UI
 
 ## Purpose
 
-The frontend serves two distinct modes with different audiences and capabilities. In both modes, the frontend is a **thin layer** — it triggers backend operations and displays results. It does not compute state.
+The student-facing web application. A thin layer that displays tutorial content, sends navigation requests to the backend, and embeds the terminal. All state management and logic lives in the [backend service](../platform/backend-service.md) — the frontend only triggers backend operations and displays results.
 
----
+## Delivery
 
-## Student Mode
+The frontend is served as static assets (HTML, JS, CSS) embedded in the [workshop-backend binary](../platform/backend-service.md). Students access it by navigating to the workspace URL in a browser — there is no separate frontend server and no installation step for students.
 
-### Audience
+This applies in both local mode (browser connects to the backend running inside the Docker container) and cluster mode (browser connects to the backend in the workspace pod, via whatever ingress or port-forward is configured).
+
+## Audience
 
 Workshop participants following a guided tutorial.
 
-### Features
+## Features
 
 - Step navigation (next, previous, jump to step)
-- Reset to step (triggers full clean reset via [Operator](../platform/operator.md))
+- Reset to step (sends reset request to backend; backend triggers operator image swap or CLI container restart)
 - Resume progress from last checkpoint
-- Markdown tutorial display
+- Markdown tutorial content display
+- Embedded terminal (WebSocket to ttyd, proxied through backend)
 - Validation feedback (did the student complete the step correctly?)
 - Cluster status panel (optional)
 
-### Key Constraint
+## Key Constraints
 
-All state management, reset logic, and validation happens server-side. The frontend only:
+All state management, reset logic, and validation lives in the backend. The frontend:
 
-1. Triggers backend transitions
-2. Displays results
-3. Shows tutorial content
+1. Sends requests to the backend API
+2. Displays results and content
+3. Embeds the terminal WebSocket stream
 
-TODO: Define the student-facing API surface — REST? WebSocket? gRPC?
-
-TODO: Define the cluster status panel — what information is shown? Real-time or polled?
-
----
-
-## Builder Mode
-
-### Audience
-
-Workshop instructors creating or editing workshops.
-
-### Features
-
-- Step list editor (add, remove, reorder steps in `step-spec.yaml`)
-- Start authoring proxy session (launch `workshop build proxy`)
-- Save step (trigger `workshop build step save`)
-- Compile workshop (trigger `workshop build compile`)
-- Export [SQLite artifact](../artifact/sqlite-artifact.md)
-- Optional YAML import/export
-
-### Key Constraint
-
-Builder mode is a client of the [CLI build commands](../platform/cli.md) — it does not interact with live Kubernetes namespaces. All authoring state lives in `step-spec.yaml` and the local Docker environment.
-
-TODO: Define how builder mode connects to the authoring namespace — direct K8s API? Through the CLI? Through a backend service?
+The frontend does not talk to the Kubernetes API, SQLite, or any external service directly.
 
 ---
 
@@ -62,16 +40,28 @@ TODO: Define how builder mode connects to the authoring namespace — direct K8s
 
 TODO: Define the frontend framework (React, Svelte, Vue, etc.).
 
-TODO: Define whether the frontend is a standalone SPA, embedded in the [Wails GUI](./gui.md), or served by the runtime platform.
+## API Surface
+
+TODO: Define the full student-facing API surface — REST for content and navigation, WebSocket for terminal proxying. Define route structure.
+
+## Cluster Status Panel
+
+TODO: Define what information is shown in the cluster status panel (for workspaces with `cluster.mode == per-workspace`). Real-time or polled?
 
 ## Markdown Rendering
 
-TODO: Define markdown rendering capabilities — standard CommonMark? Extensions (diagrams, code highlighting, tabs, admonitions)?
+TODO: Define markdown rendering capabilities — standard CommonMark? Extensions (syntax highlighting, diagrams, admonitions, tabs)?
 
 ## Authentication
 
-TODO: Define how students and instructors authenticate to the frontend.
+TODO: Define how students authenticate to access their workspace frontend.
 
 ## Responsive Design
 
 TODO: Define target devices — desktop only? Tablet? Mobile?
+
+---
+
+## What This Is NOT
+
+Builder mode is a **separate binary** (the [Wails desktop GUI](./gui.md)), not a mode of this frontend. Authors do not use this frontend to build workshops — they use the Wails app on their workstation.

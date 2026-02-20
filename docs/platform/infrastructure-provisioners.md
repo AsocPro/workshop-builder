@@ -12,14 +12,6 @@ External tools orchestrated by the [CLI](./cli.md) and [Operator](./operator.md)
 - **What it does:** Creates lightweight K3s clusters inside Docker containers
 - **Managed by:** CLI (local mode)
 
-### k3s
-
-- **Used when:** Direct local installation is preferred over containerized clusters
-- **What it does:** Lightweight Kubernetes distribution
-- **Managed by:** CLI (local mode)
-
-TODO: Clarify when k3s is used vs k3d. Is k3s a fallback or a separate configuration option?
-
 ### vcluster
 
 - **Used when:** Kubernetes backend + `cluster.mode == per-workspace`
@@ -51,11 +43,11 @@ Operator detects cluster.mode == per-workspace in WorkspaceInstance
 
 ## Key Constraint
 
-Cluster provisioning is **never** expressed in `step-spec.yaml`. It is infrastructure orchestration logic that lives in the CLI and Operator.
+Cluster provisioning is **never** expressed in `workshop.yaml`. It is infrastructure orchestration logic that lives in the CLI and Operator.
 
 ## Version Management
 
-TODO: Define how provisioner versions (k3d, vcluster) are managed and how Kubernetes version selection (`cluster.version` in workspace.yaml) is implemented.
+TODO: Define how provisioner versions (k3d, vcluster) are managed and how Kubernetes version selection (`cluster.version` in the WorkspaceTemplate) is implemented.
 
 ## Cleanup
 

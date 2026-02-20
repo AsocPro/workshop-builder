@@ -6,12 +6,12 @@ Holds the canonical types and validation logic shared across all platform compon
 
 ## What It Contains
 
-- Step-spec parser (`pkg/stepspec`)
+- `workshop.yaml` parser (`pkg/workshop`)
 - `WorkspaceTemplate` structs
 - `WorkspaceInstance` structs
 - Validation rules
 - Capability matrix logic (what each backend supports)
-- CRD generation logic (workspace metadata + step image tags → CRD objects)
+- CRD generation logic (workshop.yaml step image tags from SQLite → CRD objects)
 
 ## What It Must NOT Contain
 
@@ -26,34 +26,31 @@ This keeps the library portable and testable without infrastructure dependencies
 
 ## Key Responsibilities
 
-### Step Spec Parsing
+### Workshop Spec Parsing
 
-- Parse `step-spec.yaml` into internal representation
-- Validate against schema (required fields, URL-safe step IDs, mutually exclusive file entry fields, local source file existence)
+- Parse `workshop.yaml` into internal representation
+- Validate against schema (required fields, URL-safe step IDs, mutually exclusive file entry fields, local source file existence, markdown field mutual exclusion)
 - Reject invalid specs with structured errors that include the field path and a human-readable message
-
-### Workspace Metadata Parsing
-
-- Parse `workspace.yaml` into internal structs
-- Validate field values and cross-field constraints
-- Enforce [capability matrix](./backend-capabilities.md) (e.g., team mode requires Kubernetes backend)
 
 ### CRD Generation
 
-- Convert parsed workspace metadata + step image tags (from SQLite) into Kubernetes CRD objects
-- Generate `WorkspaceTemplate` and `WorkspaceInstance` specs
+- Convert parsed workshop step data + image tags (from SQLite) into Kubernetes CRD objects
+- Populate `WorkspaceTemplate.spec.steps` from SQLite image tags
+- Generate `WorkspaceInstance` specs
 - Normalize field values and apply defaults
+
+Note: WorkspaceTemplate operator config fields (lifecycle, isolation, cluster mode, resources, access) are authored directly in the CRD by operators — the library provides the types and validation for them but does not generate them from any author-facing file.
 
 ### Capability Matrix
 
 - Define what each backend (Docker, Kubernetes) supports
-- Provide clear errors when a workspace definition requires capabilities unavailable on the target backend
+- Provide clear errors when a workspace configuration requires capabilities unavailable on the target backend
 
 ## Consumers
 
 | Consumer | How It Uses the Library |
 |---|---|
-| [CLI](./cli.md) | Step-spec parsing, workspace metadata parsing, validation, CRD generation, capability checks |
+| [CLI](./cli.md) | workshop.yaml parsing, validation, CRD step population, capability checks |
 | [Operator](./operator.md) | Domain structs, validation |
 | [GUI](../presentation/gui.md) | Parsing, validation, status interpretation |
 
@@ -63,14 +60,13 @@ TODO: Define the Go package layout. Proposed structure:
 
 ```
 pkg/
-  stepspec/     # step-spec.yaml parser, types, and validation
-  workspace/    # workspace.yaml parser, types, and validation
-  crd/          # WorkspaceTemplate and WorkspaceInstance generation
+  workshop/     # workshop.yaml parser, types, and validation
+  crd/          # WorkspaceTemplate and WorkspaceInstance types and generation
   capability/   # backend capability matrix and enforcement
   types/        # shared domain types used across packages
 ```
 
-`pkg/stepspec` replaces the former `pkg/compose` package. There is no `pkg/translate` package — Compose-to-Kubernetes translation is removed. Step images are built by Dagger (outside this library) and referenced by tag in SQLite; the library generates CRD objects that include those tags directly.
+`pkg/workshop` replaces the former `pkg/compose` and `pkg/stepspec` packages. There is no `pkg/translate` package — Compose-to-Kubernetes translation is removed. There is no `pkg/workspace` package — workspace deployment config lives in the CRD, authored directly by operators.
 
 ## Testing Strategy
 

@@ -2,12 +2,15 @@
 
 ## Purpose
 
-Transform a [`step-spec.yaml`](../definition/step-spec.md) and local source files into a set of tagged OCI images and an updated [SQLite artifact](./sqlite-artifact.md). Each step becomes one immutable image. The SQLite file records educational metadata and image references.
+Transform a [`workshop.yaml`](../definition/step-spec.md) and local source files into a set of tagged OCI images and an updated [SQLite artifact](./sqlite-artifact.md). Each step becomes one immutable image representing the **completed reference state** of that step. The SQLite file records educational metadata, image references, tutorial content, and validation specs.
 
 ## Input
 
-- `step-spec.yaml` (validated by [Shared Go Library](../platform/shared-go-library.md))
+- `workshop.yaml` (validated by [Shared Go Library](../platform/shared-go-library.md))
 - Local source files referenced by `files[].source` entries
+- Markdown files referenced by `steps[].markdownFile` entries
+- Goss spec files referenced by `steps[].gossFile` entries
+- The `workshop-backend` binary, tini, and goss binary (platform binaries — pulled from a platform release or built from source)
 - Registry credentials (for pushing images)
 
 ## Output
@@ -17,13 +20,13 @@ Transform a [`step-spec.yaml`](../definition/step-spec.md) and local source file
 | Tagged OCI images | One image per step, pushed to a container registry |
 | Updated SQLite | Educational metadata + image tags/digests per step |
 
-The `step-spec.yaml` and local source files are **not** distributed — only the SQLite file and the images in the registry are needed at runtime.
+The `workshop.yaml` and local source files are **not** distributed — only the SQLite file and the images in the registry are needed at runtime.
 
 ## Key Properties
 
 - **No diffs.** Each step image contains complete cumulative state.
 - **No patch chains.** No step depends on a previous step at runtime — the image is the state.
-- **Deterministic.** Building from the same `step-spec.yaml` produces the same image content (modulo base image changes).
+- **Deterministic.** Building from the same `workshop.yaml` produces the same image content (modulo base image changes).
 - **Incrementally cacheable.** Dagger layer caching skips unchanged steps automatically.
 
 ## Dagger Pipeline
@@ -31,16 +34,18 @@ The `step-spec.yaml` and local source files are **not** distributed — only the
 The CLI invokes a Dagger pipeline that builds steps sequentially:
 
 ```
-base.image (from step-spec.yaml)
+base.image (from workshop.yaml)
       │
       ▼
 Step 1 build:
   FROM base.image
+  → if any step has goss: install goss binary to /usr/local/bin/goss
   → COPY / write files (from files[] entries)
   → ENV (from env map)
   → RUN commands (from commands[])
+  → ADD platform layer: tini + workshop-backend binary
+  → SET ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
   → push as <workshop.image>:<step-1-id>
-  → push as <workshop.image>:<step-1-id>-<short-digest>
       │
       ▼
 Step 2 build:
@@ -48,17 +53,40 @@ Step 2 build:
   → COPY / write files
   → ENV
   → RUN commands
+  → ADD platform layer: tini + workshop-backend binary  (refreshed to latest)
+  → SET ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
   → push as <workshop.image>:<step-2-id>
-  → push as <workshop.image>:<step-2-id>-<short-digest>
       │
       ▼
       ...
       │
       ▼
-Step N pushed → SQLite updated with all image tags and digests
+Step N pushed → SQLite updated with all image tags, markdown, and goss specs
 ```
 
-OCI layer inheritance replaces snapshot flattening. Each step image is the complete accumulated state at that point — no runtime computation of diffs between steps is needed.
+The platform layer (tini + backend binary) is added to every step image by the pipeline. Authors do not configure this — it is always injected at compile time. The backend binary version used is determined by the platform release in use at compile time.
+
+## Markdown Compilation
+
+For each step that has a `markdown` or `markdownFile` field in `workshop.yaml`, the pipeline:
+
+1. Resolves the content — uses `markdown` directly as inline text, or reads the file at `markdownFile` path
+2. Writes the resolved content to the `steps.markdown` column in SQLite
+
+Markdown is compiled into SQLite only — it does not affect the container image contents. This happens as part of the same pipeline run, after images are pushed.
+
+## Goss Spec Compilation
+
+For each step that has a `goss` or `gossFile` field in `workshop.yaml`, the pipeline:
+
+1. Resolves the spec content — uses `goss` directly as inline text, or reads the file at `gossFile` path
+2. Writes the resolved spec to the `steps.goss_spec` column in SQLite
+
+Goss specs are stored in SQLite only — they do not affect container image contents. At runtime, the backend service writes the current step's spec to `/workshop/.goss/goss.yaml` inside the container on each step transition. This handles both fresh container starts and in-place step advancement within the same running container.
+
+If any step in the workshop declares a goss spec, the pipeline also installs the `goss` binary into the base image layer at `/usr/local/bin/goss`. This is done once — all subsequent step images inherit it.
+
+Each step image is the complete accumulated **completed reference state** at that point — no runtime computation of diffs between steps is needed.
 
 ## Incremental Rebuilds
 
@@ -74,19 +102,23 @@ Dagger's own layer cache provides a second level of incrementality: if a step's 
 
 ## SQLite Update
 
-After all images are pushed, the pipeline writes to the SQLite artifact:
+After all images are pushed and markdown is resolved, the pipeline writes to the SQLite artifact:
 
-- For each step: `image_tag` and `image_digest` columns in the `steps` table
+- For each step: `image_tag`, `title`, `markdown` (resolved from `markdown` or `markdownFile`), and `goss_spec` (resolved from `goss` or `gossFile`) in the `steps` table
 - Workshop-level metadata row in the `workshop` table (if not already present)
 
-Educational metadata (step titles, markdown, validation rules) is written separately — either authored manually in the YAML export format and imported, or set via the CLI/GUI authoring tools.
+A single compile run produces a complete, ready-to-distribute SQLite file with all step content and image references. No separate authoring step is required for tutorial content.
 
 ## Validation During Compilation
 
-Before the Dagger build starts, the shared library validates the `step-spec.yaml`:
+Before the Dagger build starts, the shared library validates the `workshop.yaml`:
 
 - Schema validation (required fields, type correctness, URL-safe IDs)
 - Source file existence (all `files[].source` paths exist on disk)
+- Markdown file existence (all `markdownFile` paths exist on disk)
+- Markdown mutual exclusion (`markdown` and `markdownFile` not both set)
+- Goss file existence (all `gossFile` paths exist on disk)
+- Goss mutual exclusion (`goss` and `gossFile` not both set)
 - Step ordering (IDs are unique, at least one step present)
 
 Validation errors abort the pipeline before any images are built.

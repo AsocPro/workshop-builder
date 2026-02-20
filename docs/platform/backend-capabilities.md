@@ -16,7 +16,7 @@ The platform supports two backends with intentionally different capability sets.
 | TTL enforcement | Basic (CLI-managed) | Full (Operator-managed) |
 | Idle suspend | No | Yes |
 | Network policies | No | Yes |
-| Nested cluster (k3d) | Yes | No (uses vcluster) |
+| Nested cluster (k3d) | Yes | No |
 | Nested cluster (vcluster) | No | Yes |
 | OIDC integration | No | Yes |
 | Batch provisioning | Limited | Full |
@@ -37,7 +37,7 @@ The [Shared Go Library](./shared-go-library.md) contains capability matrix logic
 2. Produces clear errors when requirements exceed backend capabilities
 3. Prevents submission of unsupported configurations
 
-Example: A `workspace.yaml` with `isolation.mode: team` will fail validation when targeting the Docker backend with a message explaining that team mode requires the Kubernetes backend.
+Example: A WorkspaceTemplate with `isolation.mode: team` will fail validation when targeting the Docker backend with a message explaining that team mode requires the Kubernetes backend.
 
 ## Feature Parity Non-Goals
 

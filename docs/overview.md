@@ -21,11 +21,10 @@ Everything an author creates to define a workshop.
 
 | Doc | What It Covers |
 |---|---|
-| [Step Spec](./definition/step-spec.md) | `step-spec.yaml` — per-step container image build recipes |
-| [Workspace Metadata](./definition/workspace-metadata.md) | `workspace.yaml` — lifecycle, isolation, cluster mode, access |
-| [Authoring](./definition/authoring.md) | CLI proxy model — recording commands and files to step-spec.yaml |
+| [Workshop Spec](./definition/workshop.md) | `workshop.yaml` — per-step container image build recipes and tutorial content |
+| [Authoring](./definition/authoring.md) | CLI proxy model — recording commands and files to `workshop.yaml` |
 
-An author writes a `step-spec.yaml` (via the CLI proxy or directly) and a `workspace.yaml`. Their output feeds into compilation.
+An author writes a single `workshop.yaml` (via the CLI proxy or directly). Deployment behavior (lifecycle, isolation, cluster mode, resources, access) is operator configuration — it lives in the [WorkspaceTemplate CRD](./platform/crds.md), not in any author-facing file.
 
 ---
 
@@ -37,12 +36,15 @@ Shared logic, orchestration, and runtime enforcement. This is the system that ac
 |---|---|
 | [Shared Go Library](./platform/shared-go-library.md) | Canonical types, validation, CRD generation — used by everything |
 | [CLI](./platform/cli.md) | Administration surface — local mode, cluster mode, build commands |
-| [CRDs](./platform/crds.md) | WorkspaceTemplate + WorkspaceInstance — cluster API objects |
+| [CRDs](./platform/crds.md) | WorkspaceTemplate + WorkspaceInstance — cluster API objects and operator config |
 | [Operator](./platform/operator.md) | Multi-tenant enforcement, step transitions (image swap), lifecycle |
-| [Infrastructure Provisioners](./platform/infrastructure-provisioners.md) | k3d, k3s, vcluster orchestration |
+| [Backend Service](./platform/backend-service.md) | Go binary embedded in every step image — serves web UI, proxies terminal, owns SQLite |
+| [Infrastructure Provisioners](./platform/infrastructure-provisioners.md) | k3d, vcluster orchestration |
 | [Backend Capabilities](./platform/backend-capabilities.md) | Docker vs Kubernetes feature matrix |
 
 The operator owns step transitions — these are image swaps: update Deployment spec → rollout → done. No namespace teardown or PVC restoration.
+
+The backend service runs inside every workspace container. It is the runtime bridge between the student browser and the workspace — serving the web UI, proxying terminal WebSocket connections, and reading/writing the per-instance SQLite database.
 
 ---
 
@@ -52,30 +54,30 @@ How workshops are compiled into portable, distributable artifacts.
 
 | Doc | What It Covers |
 |---|---|
-| [Compilation](./artifact/compilation.md) | Dagger build pipeline — step-spec.yaml → OCI images + SQLite |
+| [Compilation](./artifact/compilation.md) | Dagger build pipeline — `workshop.yaml` → OCI images + SQLite |
 | [SQLite Artifact](./artifact/sqlite-artifact.md) | Metadata-only distribution format, schema, YAML export/import |
 
-Compilation transforms `step-spec.yaml` into a set of tagged OCI images and an updated SQLite file. The SQLite file contains no blobs — only metadata and image references.
+Compilation transforms `workshop.yaml` into a set of tagged OCI images and an updated SQLite file. The SQLite file contains no blobs — only metadata and image references.
 
 ---
 
 ### 4. [Presentation](./presentation/) — The Interface
 
-How users interact with the platform.
+How users interact with the platform. There are two separate interfaces for two distinct audiences.
 
 | Doc | What It Covers |
 |---|---|
-| [Frontend](./presentation/frontend.md) | Student mode (step navigation, tutorials) + Builder mode (step editing, compilation) |
-| [GUI](./presentation/gui.md) | Wails desktop app for workshop administration and local mode |
+| [Frontend](./presentation/frontend.md) | Student-facing web UI — served by the backend inside the workspace container |
+| [GUI](./presentation/gui.md) | Wails desktop app for workshop authors — builder mode, compilation, workstation-side tools |
 
-Presentation layers are thin — they trigger backend operations and display results.
+The student UI is served directly from inside the workspace container by the backend service. The builder GUI is a separate binary that runs on the author's workstation and interacts with local tools (Docker, Dagger).
 
 ---
 
 ## Core Principles
 
 1. **Kubernetes is the authoritative multi-tenant control plane.**
-2. **`step-spec.yaml` defines what container images contain** — never lifecycle or isolation.
+2. **`workshop.yaml` defines what container images contain** — never lifecycle or isolation.
 3. **Runtime must be simpler than authoring.**
 4. **Reset must be deterministic** — jumping to any step produces identical state.
 5. **Each step is a complete OCI image** — no diffs or patch chains at runtime.
@@ -87,33 +89,36 @@ Presentation layers are thin — they trigger backend operations and display res
 
 ```
 Author creates:
-  step-spec.yaml + workspace.yaml
+  workshop.yaml
   (written via CLI proxy or directly)
             │
     workshop build compile
     (Dagger pipeline)
             │
-     OCI images pushed          SQLite updated
-     to registry                (metadata + image tags)
-            │                         │
-            └──────────┬──────────────┘
-                       │
-          CLI reads SQLite + workspace.yaml
+     OCI images pushed          SQLite updated       Backend binary
+     to registry                (metadata +          injected into
+     (one per step)              image tags)         each step image
+            │                         │                    │
+            └──────────┬──────────────┘                    │
+                       │              (backend embedded in images)
+          CLI reads SQLite artifact
                        │
           ┌────────────┴─────────────────┐
           │                              │
     Local mode                    Cluster mode
-    (docker run                   (CRDs created
-     step image)                   in K8s)
+    (docker run step image)       (WorkspaceTemplate + WorkspaceInstance CRDs)
+          │                              │
+    Backend starts in container   Operator reconciles:
+      - serves student web UI       - provisions namespace
+      - spawns ttyd                 - deploys step image
+      - reads/writes SQLite         - manages lifecycle
+      - step transitions via          - step transitions via
+        CLI stop/start                  image swap
                                         │
-                               Operator reconciles:
-                                 - provisions namespace
-                                 - deploys step image
-                                 - manages lifecycle
-                                 - handles step transitions
-                                   (image swap)
-                                        │
-                              Frontend displays to student
+                                Backend starts in new pod
+                                  - serves student web UI
+                                  - spawns ttyd
+                                  - reads/writes SQLite
 ```
 
 ## What This System Is NOT
@@ -125,6 +130,7 @@ Author creates:
 - A system that simulates namespaces in Docker
 - A system requiring feature parity across backends
 - A system that stores file state in SQLite
+- A system with an author-facing file for deployment/operator configuration
 
 ## Project Status
 

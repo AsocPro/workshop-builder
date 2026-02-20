@@ -81,7 +81,7 @@ TODO: Define retention policy for runtime snapshots — how many are kept? Per s
 
 ## What It Does NOT Do
 
-- Parse `step-spec.yaml` directly (receives image tags via [CRD](./crds.md))
+- Parse `workshop.yaml` directly (receives image tags via [CRD](./crds.md))
 - Handle local mode (that's [CLI](./cli.md)-only)
 - Implement GUI or frontend logic
 - Restore PVC contents on step transition (there are no per-step PVC archives)

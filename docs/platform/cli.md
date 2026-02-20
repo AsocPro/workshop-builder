@@ -10,12 +10,12 @@ Primary control surface for the platform. Handles workspace orchestration across
 
 Single-user execution using Docker as the backend.
 
-1. Read `step-spec.yaml` + `workspace.yaml`
+1. Read `workshop.yaml`
 2. Validate via [Shared Go Library](./shared-go-library.md)
 3. Read current step's `image_tag` from SQLite
 4. Pull step image from registry
 5. Run container from step image (`docker run`)
-6. Spawn ttyd subprocess for terminal access
+6. Backend service inside container handles terminal and UI
 7. Provision nested cluster if required (k3d)
 8. Manage workspace lifecycle locally
 
@@ -25,17 +25,19 @@ Step transitions in local mode: stop current container → pull next step image 
 
 Multi-tenant execution against a Kubernetes cluster.
 
-1. Read `step-spec.yaml` + `workspace.yaml`
+1. Read `workshop.yaml`
 2. Validate
 3. Read step image tags from SQLite artifact
-4. Generate [WorkspaceTemplate / WorkspaceInstance CRDs](./crds.md) (via Shared Go Library)
-5. Submit to Kubernetes API
+4. Populate [WorkspaceTemplate CRD](./crds.md) step fields (via Shared Go Library)
+5. Submit WorkspaceInstance CRDs to Kubernetes API
 6. Watch status
 7. Support batch provisioning for workshops
 
+Deployment behavior (lifecycle, isolation, cluster mode, resources, access) comes from the WorkspaceTemplate CRD, configured by the operator/admin. The CLI does not read a `workspace.yaml`.
+
 ## Cluster Provisioning Logic
 
-When `cluster.mode == per-workspace` in `workspace.yaml`, the CLI handles cluster provisioning differently depending on backend:
+When `cluster.mode == per-workspace` in the WorkspaceTemplate, the CLI handles cluster provisioning differently depending on backend:
 
 ### Docker Backend (Local)
 
@@ -55,7 +57,7 @@ The `workshop build` command group handles the full authoring and compilation li
 
 ### `workshop build proxy`
 
-Start an interactive authoring session. Launches a container from the current step image (or `base.image` for step 1) and wraps the shell with an observer that records changes to `step-spec.yaml`.
+Start an interactive authoring session. Launches a container from the current step image (or `base.image` for step 1) and wraps the shell with an observer that records changes to `workshop.yaml`.
 
 ```
 $ workshop build proxy
@@ -66,26 +68,26 @@ Type 'exit' to end the session.
 ```
 
 The proxy observes:
-- **Filesystem changes** → recorded as `files:` entries in `step-spec.yaml`
+- **Filesystem changes** → recorded as `files:` entries in `workshop.yaml`
 - **Environment variable changes** → recorded as `env:` entries
 - **Shell commands run** → recorded as `commands:` entries
 
-The proxy records *intent* (what the author did), not *observed state* (a snapshot of the full filesystem). This keeps `step-spec.yaml` human-readable and version-controllable.
+The proxy records *intent* (what the author did), not *observed state* (a snapshot of the full filesystem). This keeps `workshop.yaml` human-readable and version-controllable.
 
 ### `workshop build step save`
 
-Finalize the current step and advance to the next. Closes the current proxy session, writes the step's accumulated changes to `step-spec.yaml`, and opens a new container session building on top of the current step image.
+Finalize the current step and advance to the next. Closes the current proxy session, writes the step's accumulated changes to `workshop.yaml`, and opens a new container session building on top of the current step image.
 
 ```
 $ workshop build step save
-Step step-1-intro finalized and saved to step-spec.yaml.
+Step step-1-intro finalized and saved to workshop.yaml.
 Opening session for step-2-deploy...
 [step-2-deploy] $
 ```
 
 ### `workshop build step new`
 
-Create a new named step slot in `step-spec.yaml` without closing the current session.
+Create a new named step slot in `workshop.yaml` without closing the current session.
 
 ```
 $ workshop build step new step-3-advanced
@@ -94,7 +96,7 @@ Added step slot: step-3-advanced (will follow step-2-deploy)
 
 ### `workshop build compile`
 
-Invoke the Dagger build pipeline. Reads `step-spec.yaml`, builds one OCI image per step sequentially, pushes images to the registry, and updates SQLite with image tags and digests.
+Invoke the Dagger build pipeline. Reads `workshop.yaml`, builds one OCI image per step sequentially, pushes images to the registry, and updates SQLite with image tags and digests.
 
 ```
 $ workshop build compile
@@ -118,7 +120,7 @@ SQLite updated: workshop.db
 
 ### `workshop build status`
 
-Show a summary of the current `step-spec.yaml` and SQLite state.
+Show a summary of the current `workshop.yaml` and SQLite state.
 
 ```
 $ workshop build status

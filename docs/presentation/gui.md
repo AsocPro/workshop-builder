@@ -1,52 +1,62 @@
-# GUI — Wails Desktop Application
+# Builder GUI — Wails Desktop Application
 
 ## Purpose
 
-Friendly admin interface for managing workshops and workspaces. Wraps CLI functionality in a graphical interface to simplify onboarding and batch management.
+The workshop authoring and administration tool. A Wails desktop app that runs on the instructor's workstation and provides a graphical interface for the full build workflow — writing steps, running the proxy session, compiling images, and managing workshop deployments.
+
+Builder mode is a **separate binary** from the student-facing frontend. Students use a browser to access the web UI served by the backend inside their workspace container. Authors use this Wails app on their own machine.
 
 ## Technology
 
-Built with [Wails](https://wails.io/) — Go backend with a web frontend.
+Built with [Wails](https://wails.io/) — Go backend with an embedded web frontend. The Go backend has direct access to the local filesystem, Docker daemon, and Dagger SDK — all of which are required for the build workflow.
 
-## Responsibilities
+## Why Wails for Builder Mode
 
-- Workshop batch management (provision/tear down multiple workspaces)
-- Workspace status display
-- Simplified onboarding for new administrators
-- Visual feedback for long-running operations
+The builder needs to run on the author's workstation and interact with local tooling (Docker for proxy sessions, Dagger for compilation). A web-based builder would require running a local server, exposing a socket, and managing cross-origin access. A Wails app runs natively and can import the [Shared Go Library](../platform/shared-go-library.md) directly — no subprocess calls needed for domain logic.
 
 ## Architecture Constraint
 
 The GUI **must**:
 
-- Call into the [Shared Go Library](../platform/shared-go-library.md) for all domain logic
+- Call into the [Shared Go Library](../platform/shared-go-library.md) for all domain logic (parsing, validation, CRD generation)
 - NOT duplicate business logic from the [CLI](../platform/cli.md)
-- Share the same validation, parsing, and translation code
+- Share the same validation, parsing, and type definitions as the CLI
 
 The GUI is a presentation layer over the same core logic the CLI uses.
 
-## Local Mode Client
+## Responsibilities
 
-The Wails app is a strong candidate for the local mode client — the environment students use to run workshops on their own machine without a cluster. In this role the Wails app would:
+### Workshop Authoring
 
-- Pull step images from the registry (using image tags from SQLite)
-- Spawn and manage workshop containers (Docker or Podman) running step images
-- Perform step transitions by stopping the current container and starting the next step image
-- Spawn ttyd as a subprocess for terminal access to the current step container
-- Run an HTTP/WebSocket proxy server in the Go backend, proxying all browser connections (including ttyd WebSocket) through a single origin to avoid CORS issues
-- Serve the web UI from the embedded WebView
+- Step list editor — add, remove, reorder steps in `workshop.yaml`
+- Markdown editor — write or import tutorial content per step
+- Start proxy session — launch `workshop build proxy` for interactive authoring
+- Save step — trigger `workshop build step save`
 
-This keeps local mode as a single distributable binary with no "open a browser and navigate to localhost" step for students. The Go backend in the Wails app has direct access to the container runtime and can manage the full workshop lifecycle.
+### Compilation
 
-TODO: Confirm whether the Wails app is the local mode client, a standalone admin GUI, or both. Decide before frontend implementation begins.
+- Compile workshop — trigger `workshop build compile` via Dagger pipeline
+- Show build progress and logs
+- Display step build status (built / not built / error)
+
+### Distribution
+
+- Export SQLite artifact
+- YAML import/export
+
+### Cluster Administration
+
+- Provision workspaces (batch or individual)
+- View workspace status
+- Tear down workspaces
 
 ## Relationship to CLI
 
-TODO: Define whether the GUI calls CLI commands as subprocesses, imports CLI logic as Go packages, or shares a common service layer.
+TODO: Define whether the GUI invokes CLI commands as subprocesses or imports CLI logic as Go packages directly. The latter is preferred to avoid subprocess management and enable shared error handling.
 
 ## Features
 
-TODO: Define the specific feature set for v1 of the GUI.
+TODO: Define the specific feature set for v1 of the GUI — which of the above are in scope for the first release.
 
 ## Frontend Technology
 
@@ -54,4 +64,4 @@ TODO: Define the frontend framework used within Wails (React, Svelte, Vue, etc.)
 
 ## Distribution
 
-TODO: Define how the GUI is packaged and distributed (platform-specific binaries, installer, etc.).
+TODO: Define how the GUI binary is packaged and distributed (platform-specific binaries, installer, Homebrew tap, etc.).
