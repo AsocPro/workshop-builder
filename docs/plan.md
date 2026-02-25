@@ -25,6 +25,10 @@ The `workshop.yaml` format is the single most consequential input decision. It d
 - [x] Add `markdown` / `markdownFile` fields per step.
 - [x] Clarify file deletion — explicit `rm` commands only.
 - [x] Rename workshop.yaml → workshop.yaml (done; step-spec.md marked superseded).
+- [x] Add navigation modes (`linear`, `free`, `guided`) and step `group`/`requires` fields.
+- [x] Add workshop-level and per-step LLM configuration.
+- [x] Drop all SQLite references — metadata baked as flat files into image.
+- [x] Document base image usage (`workshop-base:{alpine,ubuntu,centos}`).
 
 ---
 
@@ -40,9 +44,9 @@ The `workshop.yaml` format is the single most consequential input decision. It d
 
 ---
 
-## Phase 2: Artifact Pipeline (Mostly Complete)
+## Phase 2: Artifact Pipeline (COMPLETE)
 
-The authoring and build pipeline. These produce the two artifacts consumed by the runtime — OCI images and the SQLite file.
+The authoring and build pipeline. These produce the artifacts consumed by the runtime — OCI images with baked-in metadata.
 
 ---
 
@@ -55,7 +59,8 @@ The CLI proxy model for recording workshop steps.
 - [x] Document step editing (edit YAML directly) and step reordering.
 - [x] Document version control integration (commit workshop.yaml).
 - [x] Document collaboration model (Git-based).
-- [ ] Define whether simultaneous proxy sessions from multiple authors are supported.
+- [x] Define whether simultaneous proxy sessions from multiple authors are supported.
+- [x] Update references from SQLite to flat file compilation.
 
 ---
 
@@ -66,32 +71,101 @@ The Dagger build pipeline.
 - [x] Reframe as Dagger pipeline (not snapshot flattening).
 - [x] Document sequential step building and OCI layer inheritance.
 - [x] Document incremental rebuild strategy (`--from-step`).
-- [x] Document SQLite update after successful build.
-- [x] Document size expectations (under 5MB for SQLite).
-- [x] Document platform layer injection (tini + backend binary added to every step image).
-- [x] Document markdown compilation (step markdown → SQLite, not image contents).
-- [x] Remove digest-pinned tag output from pipeline.
+- [x] Document size expectations.
+- [x] Document platform layer injection (tini + backend + goss + asciinema + bashrc).
+- [x] Document metadata baking — flat files under `/workshop/` instead of SQLite.
+- [x] Document workshop.json generation and per-step metadata files.
+- [x] Document base image usage and custom base image injection.
+- [x] Remove all SQLite references.
 - [ ] Define what validation occurs during the Dagger build (e.g., RUN command failure behavior).
 - [ ] Provide size estimates for typical OCI image stacks.
 - [ ] Define how the backend binary version is pinned / sourced at compile time.
 
 ---
 
-### 5. SQLite Artifact (`artifact/sqlite-artifact.md`)
+### 5. Flat File Artifact (`artifact/sqlite-artifact.md`)
 
-The portable metadata distribution format.
+*Formerly "SQLite Artifact" — replaced by flat file design.*
 
-- [x] Define the concrete SQLite schema (no blob columns).
-- [x] Document size expectations (under 5MB vs previous hundreds of MB).
-- [x] Document distribution model (SQLite separate from images).
-- [x] Add "Step Image Registry" section replacing "Compiled Step Artifacts."
-- [x] Clarify dual role: distribution artifact (read-only) vs per-instance working copy (backend writes runtime_state here).
-- [x] Remove image_digest column — no digest-pinned tags in v1.
-- [x] Add TODO placeholder for completion/validation/unlock system (dedicated design workstream).
-- [ ] Define the YAML export format and directory structure.
-- [ ] Define integrity verification — checksums? Signatures? Schema version validation on load?
-- [ ] Define how schema migrations work when the platform evolves.
-- [ ] Design the step completion, validation, and unlock condition system.
+- [x] Replace SQLite schema with flat file filesystem layout.
+- [x] Document `/workshop/` read-only metadata directory structure.
+- [x] Document `/workshop/runtime/` ephemeral runtime data directory.
+- [x] Define workshop.json schema.
+- [x] Define meta.json, content.md, goss.yaml, llm.json schemas.
+- [x] Define JSONL runtime file formats (command-log, state-events, session.cast, llm-history).
+- [x] Document state derivation from event log (no separate state file).
+- [x] Document migration path from SQLite design.
+- [x] Document distribution model (image IS the workshop — no separate artifact).
+
+---
+
+## Phase A: Base Images + Shell Instrumentation (NEW)
+
+Foundation for monitoring and recording capabilities.
+
+---
+
+### A1. Base Images (`platform/base-images.md`)
+
+- [x] Define three base images (alpine, ubuntu, centos) and what's included.
+- [x] Document OCI layer deduplication benefits.
+- [x] Document platform update workflow (rebuild base → rebuild workshops).
+- [x] Document custom base image fallback (Dagger injects platform layer).
+- [x] Provide example Containerfile for base image build.
+
+---
+
+### A2. Instrumentation (`platform/instrumentation.md`)
+
+- [x] Document `/etc/workshop-platform.bashrc` with PROMPT_COMMAND hook.
+- [x] Document command-log.jsonl format and design decisions.
+- [x] Document asciinema recording setup (ttyd → asciinema rec → bash).
+- [x] Document session.cast format (asciicast v2).
+- [x] Document backend file watcher for command log.
+- [x] Document reconnection handling and TUI support.
+- [x] Document typical data volumes.
+
+---
+
+## Phase B: Instructor Monitoring + LLM Help (NEW)
+
+---
+
+### B1. Instructor Dashboard (`platform/instructor-dashboard.md`)
+
+- [x] Document Docker mode (local, single-user — backend reads local files).
+- [x] Document Kubernetes mode (aggregated — separate dashboard service).
+- [x] Document SSE real-time event streaming.
+- [x] Document authentication (bearer token for Docker, OIDC for K8s).
+- [x] Document views: student list, student detail, completion matrix.
+- [x] Document dashboard service API surface.
+
+---
+
+### B2. LLM Help (`platform/llm-help.md`)
+
+- [x] Document workshop-level and per-step LLM configuration.
+- [x] Document help modes (hints, explain, solve).
+- [x] Document context assembly (commands + goss + markdown + instructor context + docs).
+- [x] Document streaming API and history endpoint.
+- [x] Document rate limiting.
+- [x] Document security (API key never baked into image).
+- [x] Document help panel UI concept.
+
+---
+
+## Phase C: Aggregation (K8s Only) (NEW)
+
+---
+
+### C1. Aggregation (`platform/aggregation.md`)
+
+- [x] Document Vector sidecar with four pipelines (commands, events, recordings, LLM).
+- [x] Document sidecar isolation (student container has no credentials).
+- [x] Document cursor tracking and restart recovery.
+- [x] Document graceful shutdown (preStop hook).
+- [x] Define Postgres schema (5 tables, 3 indexes).
+- [x] Provide example pod specification with sidecar.
 
 ---
 
@@ -106,13 +180,19 @@ The runtime engine running inside each workspace container. This is what makes a
 The Go binary embedded in every step image. **The heart of single-user local mode.**
 
 - [x] Document purpose and role — runtime engine inside each workspace container.
-- [x] Document container startup sequence (tini → backend → ttyd).
-- [x] Document SQLite lifecycle (distribution artifact → per-instance working copy).
-- [x] Document how the binary gets injected by the Dagger pipeline.
+- [x] Document container startup sequence (tini → backend → ttyd/asciinema).
+- [x] Document flat file metadata reading (replaces SQLite lifecycle).
+- [x] Document state derivation from event log replay.
+- [x] Document how the binary gets injected (base images or Dagger platform layer).
 - [x] Document step transition behavior (starts fresh on each new container).
-- [ ] Define the full API surface (routes, REST vs WebSocket, auth).
-- [ ] Define step completion and validation mechanism — dedicated design workstream needed.
-- [ ] Define how the distribution SQLite is provided to the container in local mode (CLI mounts it? env var pointing to registry? baked in?).
+- [x] Document asciinema recording integration.
+- [x] Document command log file watching.
+- [x] Document non-linear navigation enforcement.
+- [x] Document LLM help integration.
+- [x] Document instructor API endpoints (Docker mode).
+- [x] Document SSE event streaming.
+- [x] Define the full API surface (student + instructor routes).
+- [x] Document connection tracking.
 - [ ] Define frontend framework and asset embedding strategy.
 
 ---
@@ -134,6 +214,8 @@ The interface served by the backend service. Defines what students actually see 
 - [ ] Define markdown rendering capabilities.
 - [ ] Define authentication.
 - [ ] Define target devices.
+- [ ] Design the LLM help panel component.
+- [ ] Design the non-linear navigation UI (completion matrix vs linear progress bar).
 
 ---
 
@@ -146,7 +228,7 @@ Focus on the local mode command surface. Cluster-specific CLI work (batch provis
 ### 8. CLI (`platform/cli.md`)
 
 - [x] Update Local Mode flow (step image pull + run, not Compose).
-- [x] Update Cluster Mode (CRD generation uses image tags from SQLite).
+- [x] Update Cluster Mode (CRD generation uses image tags).
 - [x] Add full "Build Commands" section (proxy, compile, step save/new, status).
 - [ ] Define the full CLI command tree — focus on local mode first (`workshop run`, `workspace reset`, `workspace list`).
 - [ ] Define CLI configuration model (config file, env vars, registry credentials).
@@ -175,7 +257,7 @@ The Wails desktop app for authors. Logically part of the single-user authoring l
 
 ## — MILESTONE: Single-User Local Mode —
 
-*Phases 1–6 define and implement everything required for a single user to author a workshop, compile it, and run it locally. Before proceeding to Phase 7, the single-user flow should be fully documented and working end-to-end.*
+*Phases 1–6 define and implement everything required for a single user to author a workshop, compile it, and run it locally with full monitoring, recording, and optional LLM help. Before proceeding to Phase 7, the single-user flow should be fully documented and working end-to-end.*
 
 ---
 
@@ -193,6 +275,7 @@ This is the glue. Every component imports it.
 - [x] Remove `pkg/translate` (no Compose-to-K8s translation needed).
 - [x] Document CRD generation responsibility (workspace metadata + image tags → CRD objects).
 - [ ] Define the Go package layout (`pkg/stepspec`, `pkg/workspace`, `pkg/crd`, `pkg/capability`, `pkg/types`).
+- [ ] Add packages for new features: `pkg/commandlog`, `pkg/recording`, `pkg/instructor`, `pkg/llm`, `pkg/state`.
 - [ ] Define testing approach — unit tests for validation, integration tests for CRD generation, golden file tests.
 - [ ] Define how this library is versioned relative to CRD versions and CLI releases.
 
@@ -225,6 +308,7 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 - [x] Update reset semantics — determinism guaranteed by OCI image immutability.
 - [ ] Define what "platform system components" are excluded from namespace cleanup.
 - [ ] Define the reconciliation flow for WorkspaceTemplate and WorkspaceInstance controllers.
+- [ ] Define how the operator configures the Vector sidecar in pod specs.
 - [ ] Define how the operator handles partial failures (image pull failure, rollout stall, etc.).
 - [ ] Define acceptable step transition times.
 - [ ] Define retention policy for runtime snapshots.
@@ -257,6 +341,8 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 - [x] Add "Dagger build pipeline" row.
 - [x] Remove PVC/manifest TODO references.
 - [x] Remove k3s — k3d is the only local nested cluster tool.
+- [x] Add monitoring and recording capabilities.
+- [x] Add LLM help and instructor dashboard capabilities.
 - [ ] Define exact validation error messages for each unsupported capability per backend.
 
 ---
@@ -267,16 +353,14 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 
 ### 16. Overview (`overview.md`)
 
-- [x] Update "What This Is" (SQLite + registry together form distribution).
-- [x] Update layer 1 table (step-spec.md, authoring).
-- [x] Update core principles (2, 5, 6).
+- [x] Update "What This Is" (image-only distribution, no SQLite).
+- [x] Update layer 1 table (workshop-spec, authoring).
+- [x] Update core principles (image IS the workshop, sidecar-based aggregation).
 - [x] New system flow diagram.
-- [x] Add "A system that stores file state in SQLite" to "What This Is NOT".
-- [x] Add backend service to platform layer table.
-- [x] Update presentation layer description (student UI vs builder GUI).
-- [x] Update system flow diagram to include backend startup in each mode.
-- [x] Add open architectural decisions section (file naming/boundary question).
-- [ ] Update with current implementation status and phase roadmap.
+- [x] Add monitoring, recording, LLM, dashboard to platform layer table.
+- [x] Update image layer structure diagram.
+- [x] Update "What This Is NOT" (no SQLite, no separate artifact).
+- [x] Add base images, instrumentation, aggregation to architecture sections.
 - [ ] Review all cross-links and ensure consistency across docs.
 
 ---
@@ -286,8 +370,11 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 | Phase | Focus | Docs | Status |
 |---|---|---|---|
 | 1 | Workshop Specification | workshop-spec, workspace-metadata | Complete |
-| 2 | Artifact Pipeline | authoring, compilation, sqlite-artifact | Mostly done |
-| 3 | Backend Runtime | backend-service | Needs API surface + SQLite delivery |
+| 2 | Artifact Pipeline | authoring, compilation, flat-file-artifact | Complete |
+| A | Base Images + Instrumentation | base-images, instrumentation | Complete |
+| B | Instructor Monitoring + LLM | instructor-dashboard, llm-help | Complete |
+| C | Aggregation (K8s) | aggregation | Complete |
+| 3 | Backend Runtime | backend-service | Mostly done (needs frontend framework) |
 | 4 | Student UI | frontend | Needs design |
 | 5 | CLI — Local Mode | cli (local) | Partially done |
 | 6 | Builder GUI | gui | Needs design |

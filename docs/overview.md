@@ -2,12 +2,13 @@
 
 ## What This Is
 
-A Kubernetes-native platform for building and running technical Linux-based workshops. Workshop content is packaged as:
+A Kubernetes-native platform for building and running technical Linux-based workshops. Workshop content is packaged as **tagged OCI images** in a container registry, one per workshop step. Each image is self-contained — all metadata (step definitions, tutorial markdown, goss specs, LLM configuration) is baked in as flat files. A workshop runs with just:
 
-1. A **SQLite artifact** containing educational metadata and OCI image references
-2. **Tagged OCI images** in a container registry, one per workshop step
+```bash
+docker run -p 8080:8080 myorg/kubernetes-101:step-1-intro
+```
 
-Together these form the portable, distributable workshop. The SQLite file is small (under 5MB); the images live in the registry with OCI layer deduplication.
+No CLI required, no external database, no separate configuration.
 
 ## Architecture Sections
 
@@ -21,7 +22,7 @@ Everything an author creates to define a workshop.
 
 | Doc | What It Covers |
 |---|---|
-| [Workshop Spec](./definition/workshop.md) | `workshop.yaml` — per-step container image build recipes and tutorial content |
+| [Workshop Spec](./definition/workshop.md) | `workshop.yaml` — per-step container image build recipes, tutorial content, navigation, LLM config |
 | [Authoring](./definition/authoring.md) | CLI proxy model — recording commands and files to `workshop.yaml` |
 
 An author writes a single `workshop.yaml` (via the CLI proxy or directly). Deployment behavior (lifecycle, isolation, cluster mode, resources, access) is operator configuration — it lives in the [WorkspaceTemplate CRD](./platform/crds.md), not in any author-facing file.
@@ -38,13 +39,18 @@ Shared logic, orchestration, and runtime enforcement. This is the system that ac
 | [CLI](./platform/cli.md) | Administration surface — local mode, cluster mode, build commands |
 | [CRDs](./platform/crds.md) | WorkspaceTemplate + WorkspaceInstance — cluster API objects and operator config |
 | [Operator](./platform/operator.md) | Multi-tenant enforcement, step transitions (image swap), lifecycle |
-| [Backend Service](./platform/backend-service.md) | Go binary embedded in every step image — serves web UI, proxies terminal, owns SQLite |
+| [Backend Service](./platform/backend-service.md) | Go binary embedded in every step image — serves web UI, proxies terminal, reads flat files, writes JSONL, manages recording and LLM help |
+| [Base Images](./platform/base-images.md) | Platform foundation layers (`workshop-base:{alpine,ubuntu,centos}`) with all tooling pre-installed |
+| [Instrumentation](./platform/instrumentation.md) | Shell command logging (PROMPT_COMMAND) and asciinema terminal recording |
+| [LLM Help](./platform/llm-help.md) | Contextual student assistance — reads command history + goss results + docs, gives hints |
+| [Instructor Dashboard](./platform/instructor-dashboard.md) | Real-time instructor visibility — Docker (local) and Kubernetes (aggregated) modes |
+| [Aggregation](./platform/aggregation.md) | Vector sidecar ships JSONL to Postgres/S3 in Kubernetes mode |
 | [Infrastructure Provisioners](./platform/infrastructure-provisioners.md) | k3d, vcluster orchestration |
 | [Backend Capabilities](./platform/backend-capabilities.md) | Docker vs Kubernetes feature matrix |
 
 The operator owns step transitions — these are image swaps: update Deployment spec → rollout → done. No namespace teardown or PVC restoration.
 
-The backend service runs inside every workspace container. It is the runtime bridge between the student browser and the workspace — serving the web UI, proxying terminal WebSocket connections, and reading/writing the per-instance SQLite database.
+The backend service runs inside every workspace container. It is the runtime bridge between the student browser and the workspace — serving the web UI, proxying terminal WebSocket connections, managing asciinema recording, and reading the flat file metadata baked into the image.
 
 ---
 
@@ -54,10 +60,10 @@ How workshops are compiled into portable, distributable artifacts.
 
 | Doc | What It Covers |
 |---|---|
-| [Compilation](./artifact/compilation.md) | Dagger build pipeline — `workshop.yaml` → OCI images + SQLite |
-| [SQLite Artifact](./artifact/sqlite-artifact.md) | Metadata-only distribution format, schema, YAML export/import |
+| [Compilation](./artifact/compilation.md) | Dagger build pipeline — `workshop.yaml` → OCI images with baked-in metadata |
+| [Flat File Artifact](./artifact/sqlite-artifact.md) | In-image metadata format (`/workshop/` filesystem layout) |
 
-Compilation transforms `workshop.yaml` into a set of tagged OCI images and an updated SQLite file. The SQLite file contains no blobs — only metadata and image references.
+Compilation transforms `workshop.yaml` into a set of tagged OCI images. Each image contains the complete workshop metadata as flat files under `/workshop/` — no separate database or distribution artifact.
 
 ---
 
@@ -81,9 +87,10 @@ The student UI is served directly from inside the workspace container by the bac
 3. **Runtime must be simpler than authoring.**
 4. **Reset must be deterministic** — jumping to any step produces identical state.
 5. **Each step is a complete OCI image** — no diffs or patch chains at runtime.
-6. **SQLite + registry together form the portable distribution.**
+6. **The container image IS the workshop** — no separate distribution artifact.
 7. **Storage cost is acceptable; operational complexity is not.**
 8. **Feature parity is NOT required across backends** — semantics must be clear.
+9. **The student container is identical in Docker and Kubernetes mode** — aggregation is bolted on via sidecar.
 
 ## System Flow
 
@@ -95,30 +102,49 @@ Author creates:
     workshop build compile
     (Dagger pipeline)
             │
-     OCI images pushed          SQLite updated       Backend binary
-     to registry                (metadata +          injected into
-     (one per step)              image tags)         each step image
-            │                         │                    │
-            └──────────┬──────────────┘                    │
-                       │              (backend embedded in images)
-          CLI reads SQLite artifact
-                       │
-          ┌────────────┴─────────────────┐
-          │                              │
-    Local mode                    Cluster mode
-    (docker run step image)       (WorkspaceTemplate + WorkspaceInstance CRDs)
-          │                              │
-    Backend starts in container   Operator reconciles:
-      - serves student web UI       - provisions namespace
-      - spawns ttyd                 - deploys step image
-      - reads/writes SQLite         - manages lifecycle
-      - step transitions via          - step transitions via
-        CLI stop/start                  image swap
-                                        │
-                                Backend starts in new pod
-                                  - serves student web UI
-                                  - spawns ttyd
-                                  - reads/writes SQLite
+     OCI images pushed to registry
+     (one per step, self-contained)
+     Each image contains:
+       - /workshop/ metadata (ALL steps)
+       - /workspace/ content (THIS step)
+       - Platform tooling (backend, goss, asciinema, bashrc)
+            │
+            │
+   ┌────────┴──────────────────┐
+   │                           │
+ Local mode                 Cluster mode
+ (docker run step image)    (WorkspaceTemplate + WorkspaceInstance CRDs)
+   │                           │
+ Backend starts:            Operator reconciles:
+   - reads /workshop/*        - provisions namespace
+   - replays state events     - deploys step image with Vector sidecar
+   - spawns ttyd+asciinema    - manages lifecycle
+   - serves student web UI    - step transitions via image swap
+   - serves instructor view       │
+   - writes JSONL files        Backend starts (same image, same behavior)
+                                 - writes JSONL files
+                                 - Vector sidecar ships to Postgres/S3
+                                 - Instructor dashboard aggregates
+```
+
+## Image Layer Structure
+
+```
+workshop-base:ubuntu (maintained by platform team)
+  ├── tini
+  ├── workshop-backend binary (embedded web UI assets)
+  ├── asciinema
+  ├── goss
+  ├── /etc/workshop-platform.bashrc (PROMPT_COMMAND instrumentation)
+  └── ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+         │
+         ▼ author layers (via workshop.yaml build)
+myorg/kubernetes-101:step-1-intro
+  ├── apt-get install kubectl helm ...     (author's packages)
+  ├── /workshop/workshop.json              (workshop identity + step list)
+  ├── /workshop/steps/*/                   (ALL steps' metadata)
+  │   ├── meta.json, content.md, goss.yaml, llm.json
+  └── /workspace/...                       (step-specific content files)
 ```
 
 ## What This System Is NOT
@@ -129,9 +155,6 @@ Author creates:
 - A system where Compose is the control plane
 - A system that simulates namespaces in Docker
 - A system requiring feature parity across backends
-- A system that stores file state in SQLite
+- A system that stores metadata in SQLite
+- A system with a separate distribution artifact
 - A system with an author-facing file for deployment/operator configuration
-
-## Project Status
-
-TODO: Add current implementation status and phase roadmap.

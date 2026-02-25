@@ -2,7 +2,9 @@
 
 ## Purpose
 
-Transform a [`workshop.yaml`](../definition/step-spec.md) and local source files into a set of tagged OCI images and an updated [SQLite artifact](./sqlite-artifact.md). Each step becomes one immutable image representing the **completed reference state** of that step. The SQLite file records educational metadata, image references, tutorial content, and validation specs.
+Transform a [`workshop.yaml`](../definition/workshop.md) and local source files into a set of tagged OCI images. Each step becomes one immutable image representing the **completed reference state** of that step. All workshop metadata — step definitions, tutorial content, goss specs, LLM configuration — is baked into each image as flat files under `/workshop/`.
+
+There is no separate distribution artifact. The container image IS the workshop.
 
 ## Input
 
@@ -10,7 +12,7 @@ Transform a [`workshop.yaml`](../definition/step-spec.md) and local source files
 - Local source files referenced by `files[].source` entries
 - Markdown files referenced by `steps[].markdownFile` entries
 - Goss spec files referenced by `steps[].gossFile` entries
-- The `workshop-backend` binary, tini, and goss binary (platform binaries — pulled from a platform release or built from source)
+- LLM doc files referenced by `steps[].llm.docs` entries
 - Registry credentials (for pushing images)
 
 ## Output
@@ -18,33 +20,54 @@ Transform a [`workshop.yaml`](../definition/step-spec.md) and local source files
 | Artifact | Description |
 |---|---|
 | Tagged OCI images | One image per step, pushed to a container registry |
-| Updated SQLite | Educational metadata + image tags/digests per step |
 
-The `workshop.yaml` and local source files are **not** distributed — only the SQLite file and the images in the registry are needed at runtime.
+The `workshop.yaml` and local source files are **not** distributed — only the images in the registry are needed at runtime. Each image contains the complete workshop metadata as flat files.
 
 ## Key Properties
 
 - **No diffs.** Each step image contains complete cumulative state.
 - **No patch chains.** No step depends on a previous step at runtime — the image is the state.
+- **No separate metadata artifact.** Workshop metadata is baked into the image, not distributed separately.
+- **Self-contained.** `docker run -p 8080:8080 <image>` — no CLI, no config files, no database.
 - **Deterministic.** Building from the same `workshop.yaml` produces the same image content (modulo base image changes).
 - **Incrementally cacheable.** Dagger layer caching skips unchanged steps automatically.
+
+## Base Images
+
+The pipeline builds on top of [platform base images](../platform/base-images.md) that include all platform tooling:
+
+| Base Image | Use Case |
+|---|---|
+| `workshop-base:alpine` | Lightweight workshops |
+| `workshop-base:ubuntu` | General Linux workshops |
+| `workshop-base:centos` | RHEL-ecosystem workshops |
+
+Base images include: tini, workshop-backend binary (with embedded web UI), goss, asciinema, and shell instrumentation (`/etc/workshop-platform.bashrc`). Authors `FROM workshop-base:<distro>` and layer on their content.
+
+When the author specifies a custom `base.image` or `base.containerFile` (not a `workshop-base:*` image), the pipeline injects the platform layer automatically.
 
 ## Dagger Pipeline
 
 The CLI invokes a Dagger pipeline that builds steps sequentially:
 
 ```
-base.image (from workshop.yaml)
+workshop-base:<distro> (or custom base.image / base.containerFile)
       │
       ▼
 Step 1 build:
-  FROM base.image
-  → if any step has goss: install goss binary to /usr/local/bin/goss
+  FROM base
+  → if custom base: inject platform layer (tini + backend + goss + asciinema + bashrc)
   → COPY / write files (from files[] entries)
   → ENV (from env map)
   → RUN commands (from commands[])
-  → ADD platform layer: tini + workshop-backend binary
-  → SET ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+  → Bake /workshop/ metadata directory:
+      /workshop/workshop.json           (workshop identity + step list + navigation)
+      /workshop/steps/<id>/meta.json    (per-step metadata)
+      /workshop/steps/<id>/content.md   (tutorial markdown)
+      /workshop/steps/<id>/goss.yaml    (validation spec, if present)
+      /workshop/steps/<id>/llm.json     (LLM config, if present)
+      /workshop/steps/<id>/llm-docs/*   (reference docs, if present)
+  → ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
   → push as <workshop.image>:<step-1-id>
       │
       ▼
@@ -53,40 +76,99 @@ Step 2 build:
   → COPY / write files
   → ENV
   → RUN commands
-  → ADD platform layer: tini + workshop-backend binary  (refreshed to latest)
-  → SET ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
   → push as <workshop.image>:<step-2-id>
       │
       ▼
       ...
       │
       ▼
-Step N pushed → SQLite updated with all image tags, markdown, and goss specs
+Step N pushed
 ```
 
-The platform layer (tini + backend binary) is added to every step image by the pipeline. Authors do not configure this — it is always injected at compile time. The backend binary version used is determined by the platform release in use at compile time.
+### Metadata Baking
 
-## Markdown Compilation
+The `/workshop/` directory is baked into the first step image and inherited by all subsequent steps. It contains the **complete** workshop definition — ALL steps' metadata, not just the current step. This enables:
 
-For each step that has a `markdown` or `markdownFile` field in `workshop.yaml`, the pipeline:
+- Non-linear navigation — the backend can render any step's tutorial content
+- Cross-step validation — goss specs for any step are available at any time
+- LLM context assembly — the help system can reference any step's configuration
+- Progress tracking — the backend knows the full step graph for completion tracking
 
-1. Resolves the content — uses `markdown` directly as inline text, or reads the file at `markdownFile` path
-2. Writes the resolved content to the `steps.markdown` column in SQLite
+The metadata is written once (in the step 1 build) and inherited unchanged through OCI layers. Subsequent steps only add their `/workspace/` content changes.
 
-Markdown is compiled into SQLite only — it does not affect the container image contents. This happens as part of the same pipeline run, after images are pushed.
+### Workshop.json Generation
 
-## Goss Spec Compilation
+The pipeline generates `/workshop/workshop.json` from `workshop.yaml`:
 
-For each step that has a `goss` or `gossFile` field in `workshop.yaml`, the pipeline:
+```json
+{
+  "name": "explore-kubernetes",
+  "image": "myorg/explore-kubernetes",
+  "navigation": "free",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "apiKeyEnv": "WORKSHOP_LLM_API_KEY",
+    "maxTokens": 1024,
+    "defaultMode": "hints"
+  },
+  "steps": [
+    {"id": "step-pods", "title": "Working with Pods", "group": "basics", "position": 0},
+    {"id": "step-services", "title": "Services & Networking", "group": "basics", "position": 1},
+    {"id": "step-configmaps", "title": "ConfigMaps & Secrets", "group": "configuration", "position": 2},
+    {"id": "step-rbac", "title": "RBAC", "group": "security", "requires": ["step-pods"], "position": 3}
+  ]
+}
+```
 
-1. Resolves the spec content — uses `goss` directly as inline text, or reads the file at `gossFile` path
-2. Writes the resolved spec to the `steps.goss_spec` column in SQLite
+### Per-Step Metadata Files
 
-Goss specs are stored in SQLite only — they do not affect container image contents. At runtime, the backend service writes the current step's spec to `/workshop/.goss/goss.yaml` inside the container on each step transition. This handles both fresh container starts and in-place step advancement within the same running container.
+For each step, the pipeline writes:
 
-If any step in the workshop declares a goss spec, the pipeline also installs the `goss` binary into the base image layer at `/usr/local/bin/goss`. This is done once — all subsequent step images inherit it.
+**`/workshop/steps/<id>/meta.json`**:
+```json
+{
+  "id": "step-pods",
+  "title": "Working with Pods",
+  "group": "basics",
+  "position": 0
+}
+```
 
-Each step image is the complete accumulated **completed reference state** at that point — no runtime computation of diffs between steps is needed.
+**`/workshop/steps/<id>/content.md`**: resolved from `markdown` or `markdownFile` field.
+
+**`/workshop/steps/<id>/goss.yaml`**: resolved from `goss` or `gossFile` field (if present).
+
+**`/workshop/steps/<id>/llm.json`**: resolved from step-level `llm` config (if present):
+```json
+{
+  "mode": "hints",
+  "context": "Common mistake: students forget the -n namespace flag.",
+  "hasDocs": true
+}
+```
+
+**`/workshop/steps/<id>/llm-docs/`**: directory containing copies of files referenced by `llm.docs` entries (if present).
+
+## Platform Layer Injection
+
+When building from a `workshop-base:*` image, the platform layer is already present — no injection needed.
+
+When building from a custom base image, the pipeline adds:
+
+```
+Custom base image layers
+  (author's Containerfile or base.image)
+          │
+          ▼
+Platform layer (injected by Dagger):
+  - /sbin/tini
+  - /usr/local/bin/workshop-backend  (embedded web UI assets)
+  - /usr/local/bin/goss
+  - /usr/bin/asciinema
+  - /etc/workshop-platform.bashrc    (PROMPT_COMMAND instrumentation)
+  ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+```
 
 ## Incremental Rebuilds
 
@@ -96,18 +178,9 @@ The `--from-step <id>` flag starts the pipeline at a specific step, treating all
 workshop build compile --from-step step-3-advanced
 ```
 
-Steps before `step-3-advanced` retain their existing tags in SQLite. Steps from `step-3-advanced` onward are rebuilt and their SQLite rows updated.
+Steps before `step-3-advanced` retain their existing tags. Steps from `step-3-advanced` onward are rebuilt.
 
 Dagger's own layer cache provides a second level of incrementality: if a step's inputs (files, env, commands, and parent image) are unchanged, Dagger skips the rebuild entirely even without `--from-step`.
-
-## SQLite Update
-
-After all images are pushed and markdown is resolved, the pipeline writes to the SQLite artifact:
-
-- For each step: `image_tag`, `title`, `markdown` (resolved from `markdown` or `markdownFile`), and `goss_spec` (resolved from `goss` or `gossFile`) in the `steps` table
-- Workshop-level metadata row in the `workshop` table (if not already present)
-
-A single compile run produces a complete, ready-to-distribute SQLite file with all step content and image references. No separate authoring step is required for tutorial content.
 
 ## Validation During Compilation
 
@@ -119,11 +192,12 @@ Before the Dagger build starts, the shared library validates the `workshop.yaml`
 - Markdown mutual exclusion (`markdown` and `markdownFile` not both set)
 - Goss file existence (all `gossFile` paths exist on disk)
 - Goss mutual exclusion (`goss` and `gossFile` not both set)
+- LLM doc file existence (all `llm.docs` paths exist on disk)
+- Navigation consistency (`group`/`requires` not used in `linear` mode)
 - Step ordering (IDs are unique, at least one step present)
+- Prerequisite graph (no cycles in `requires` references)
 
 Validation errors abort the pipeline before any images are built.
-
-TODO: Define what additional validation occurs during the build — e.g., whether RUN command failures abort the pipeline or are reported as warnings.
 
 ## Recompilation
 
@@ -133,10 +207,10 @@ Use `--from-step <id>` for incremental rebuilds when only later steps have chang
 
 ## Size Expectations
 
-Because each step image is a complete layer stack (not a diff), storage in the registry grows with step count and base image size. For a typical workshop with 10 steps on an `ubuntu:22.04` base:
+Because each step image is a complete layer stack (not a diff), storage in the registry grows with step count and base image size. For a typical workshop with 10 steps on a `workshop-base:ubuntu` base:
 
 - Each step adds only its changed files and build outputs as new layers
 - OCI layer deduplication in the registry minimizes actual storage
 - Unchanged layers are shared across all step images
-
-The SQLite artifact is small regardless of step count — it contains only metadata and image references, not image data. Typical workshops: **under 5MB** for the SQLite file.
+- The `/workshop/` metadata directory adds minimal overhead (typically under 1MB)
+- Multiple workshops sharing the same base image benefit from shared base layers

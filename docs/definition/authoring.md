@@ -35,8 +35,8 @@ Provide instructors with a natural, incremental workflow for building workshops.
 
 6. Run: workshop build compile
    → Dagger builds one OCI image per step
+   → Each image contains all metadata as flat files under /workshop/
    → Images pushed to registry
-   → SQLite updated with image tags
 ```
 
 ## Key Properties
@@ -82,4 +82,4 @@ Unlike the previous snapshot-based model, there is no binary authoring state to 
 
 Multiple instructors can collaborate by editing `workshop.yaml` in a shared Git repository. The normal Git workflow applies: branch, commit, review, merge.
 
-TODO: Define whether simultaneous proxy sessions from multiple authors are supported — i.e., can two authors build proxy sessions concurrently against different steps?
+**Builds are local-only**: Each author builds locally with `workshop build compile`. There is no shared build coordination required — all builds happen on individual machines.

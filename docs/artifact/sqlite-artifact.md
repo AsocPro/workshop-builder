@@ -1,165 +1,276 @@
-# SQLite Artifact — Workshop Metadata Distribution
+# Flat File Artifact — In-Image Workshop Metadata
+
+*This document replaces the previous SQLite artifact design. Workshop metadata is now baked into the container image as flat files — there is no separate distribution artifact.*
 
 ## Purpose
 
-The SQLite database file serves two related roles:
+Workshop metadata — step definitions, tutorial content, goss specs, LLM configuration — is stored as flat files in a read-only `/workshop/` directory baked into every step image at build time. Runtime state — command logs, state events, recordings — is written to an ephemeral `/workshop/runtime/` directory during the student session.
 
-1. **Distribution artifact** — produced by the compilation pipeline, contains educational content (markdown, goss validation specs), step image references, and navigation. Distributed alongside the OCI images (via Git, download, etc.). Read-only.
+There is no SQLite database, no separate distribution artifact, and no external configuration. The container image IS the workshop.
 
-2. **Per-instance working database** — at runtime, the [backend service](../platform/backend-service.md) copies the distribution SQLite into ephemeral container storage and uses the copy as the per-instance working database, writing student progress (`runtime_state`, `custom_state`) into it.
+## Why Flat Files
 
-Each workspace instance has its own working copy. There is no shared SQLite across instances — a namespace is a single workspace with a single backend process writing to a single database file. SQLite's single-writer model is appropriate for this scope.
+- **No separate artifact to manage** — the image is the complete package
+- **`docker run` just works** — no CLI, no config mount, no database delivery
+- **Human-readable** — inspect with `cat`, `ls`, standard tooling
+- **OCI layer efficiency** — metadata directory is one layer shared across all step images
+- **Simple backend** — read files from disk, no database driver or query layer
+- **Non-linear navigation** — all steps' metadata available in every image
 
-Images live in a container registry and are never stored in SQLite.
+## Filesystem Layout
 
-## Why SQLite
+### Build-Time Metadata (`/workshop/` — read-only)
 
-- Single file — trivially portable and distributable
-- No server process — embedded in the runtime
-- Queryable — inspect contents with standard tooling
-- Transactional — safe concurrent reads, atomic writes
-- Small — metadata-only, no blobs
-
-## Schema
-
-```sql
--- Workshop identity
-CREATE TABLE workshop (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    version     TEXT NOT NULL DEFAULT 'v1',
-    created_at  DATETIME NOT NULL
-);
-
--- Step definitions and image references
-CREATE TABLE steps (
-    id              TEXT PRIMARY KEY,
-    workshop_id     TEXT NOT NULL REFERENCES workshop(id),
-    position        INTEGER NOT NULL,
-    title           TEXT NOT NULL,
-    markdown        TEXT,
-    image_tag       TEXT NOT NULL,   -- e.g. myorg/kubernetes-101:step-1-intro
-    goss_spec       TEXT             -- goss YAML spec for validating step completion; NULL = no validation
-);
-
--- Per-step metadata: hints, unlock conditions, extensible key/value pairs
-CREATE TABLE step_metadata (
-    step_id  TEXT NOT NULL REFERENCES steps(id),
-    key      TEXT NOT NULL,
-    value    TEXT NOT NULL,
-    PRIMARY KEY (step_id, key)
-);
-
--- Step navigation graph
-CREATE TABLE navigation (
-    step_id       TEXT PRIMARY KEY REFERENCES steps(id),
-    next_step_id  TEXT REFERENCES steps(id),
-    prev_step_id  TEXT REFERENCES steps(id),
-    unlock_condition TEXT   -- optional expression; NULL means always unlocked
-);
-
--- Step validation uses goss specs stored in `steps.goss_spec`. At runtime, the backend
--- service writes the current step's spec to /workshop/.goss/goss.yaml inside the container
--- on each step transition. When the student clicks Validate, the backend runs
--- `goss validate -g /workshop/.goss/goss.yaml` and returns results to the frontend.
--- A NULL goss_spec means no validation — the student can advance freely.
---
--- TODO: Unlock conditions (navigation.unlock_condition), hint systems, and the
--- step_metadata key/value schema are not yet fully designed.
-
--- Per-workspace runtime state
-CREATE TABLE runtime_state (
-    workspace_id  TEXT NOT NULL,
-    step_id       TEXT NOT NULL REFERENCES steps(id),
-    status        TEXT NOT NULL,   -- pending | active | completed
-    started_at    DATETIME,
-    completed_at  DATETIME,
-    PRIMARY KEY (workspace_id, step_id)
-);
-
--- Arbitrary per-student state
-CREATE TABLE custom_state (
-    workspace_id  TEXT NOT NULL,
-    key           TEXT NOT NULL,
-    value         TEXT NOT NULL,
-    PRIMARY KEY (workspace_id, key)
-);
+```
+/workshop/
+  ├── workshop.json                     # identity, navigation mode, step list, LLM config
+  ├── steps/
+  │   ├── step-pods/
+  │   │   ├── meta.json                 # title, position, group, requires
+  │   │   ├── content.md                # tutorial markdown
+  │   │   ├── goss.yaml                 # validation spec (optional)
+  │   │   ├── llm.json                  # LLM config (optional)
+  │   │   └── llm-docs/                 # reference docs for LLM context (optional)
+  │   │       ├── kubectl-cheatsheet.md
+  │   │       └── ...
+  │   ├── step-services/
+  │   │   ├── meta.json
+  │   │   ├── content.md
+  │   │   └── goss.yaml
+  │   └── ...
 ```
 
-There are no blob columns. No manifest bundles, no file archives, no tar blobs. Step state is fully represented by the OCI image referenced in `steps.image_tag`.
+### Runtime Data (`/workshop/runtime/` — ephemeral)
 
-## Database Sections
+```
+/workshop/runtime/                      # created at runtime, ephemeral
+  ├── command-log.jsonl                 # every command + timestamp + exit code
+  ├── state-events.jsonl                # state transitions (IS the state — replayed on startup)
+  ├── session.cast                      # asciinema recording (asciicast v2)
+  └── llm-history.jsonl                 # LLM interactions
+```
 
-### 1. Workshop Definition
+The `/workshop/runtime/` directory is created by the backend on first startup. Its contents are ephemeral — they exist only for the lifetime of the container (or the shared volume in Kubernetes mode where a [Vector sidecar](./aggregation.md) ships them to Postgres).
 
-| Table | Contents |
-|---|---|
-| `workshop` | Workshop identity: name, version, creation timestamp |
-| `steps` | Per-step metadata: title, position, markdown content, OCI image tag, goss validation spec |
-| `step_metadata` | Arbitrary per-step key/value pairs: hints, unlock conditions |
-| `navigation` | Step ordering and unlock conditions |
+## Schema: workshop.json
 
-### 2. Step Image Registry
+The top-level workshop identity and step manifest.
 
-For each step, `steps.image_tag` records the built OCI image tag (e.g. `myorg/kubernetes-101:step-1-intro`). This is written by the [Compilation Layer](./compilation.md) after a successful Dagger build.
+```json
+{
+  "name": "explore-kubernetes",
+  "image": "myorg/explore-kubernetes",
+  "navigation": "free",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "apiKeyEnv": "WORKSHOP_LLM_API_KEY",
+    "maxTokens": 1024,
+    "defaultMode": "hints"
+  },
+  "steps": [
+    {
+      "id": "step-pods",
+      "title": "Working with Pods",
+      "group": "basics",
+      "position": 0
+    },
+    {
+      "id": "step-services",
+      "title": "Services & Networking",
+      "group": "basics",
+      "position": 1
+    },
+    {
+      "id": "step-rbac",
+      "title": "RBAC",
+      "group": "security",
+      "requires": ["step-pods"],
+      "position": 2
+    }
+  ]
+}
+```
 
-The operator and CLI read `image_tag` to perform step transitions — no manifest bundles or file archives are needed.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | Workshop identifier |
+| `image` | string | Yes | Image name used for tag generation |
+| `navigation` | string | Yes | `linear`, `free`, or `guided` |
+| `llm` | object | No | Workshop-level LLM configuration (omitted if LLM not configured) |
+| `llm.provider` | string | Yes* | LLM provider |
+| `llm.model` | string | Yes* | Model identifier |
+| `llm.apiKeyEnv` | string | Yes* | Env var name for API key |
+| `llm.maxTokens` | number | No | Max response tokens |
+| `llm.defaultMode` | string | No | Default help mode |
+| `steps` | array | Yes | Ordered list of step references |
+| `steps[].id` | string | Yes | Step identifier (matches directory name under `steps/`) |
+| `steps[].title` | string | Yes | Display title |
+| `steps[].group` | string | No | Group name for guided navigation |
+| `steps[].requires` | array | No | Prerequisite step IDs |
+| `steps[].position` | number | Yes | Display order (0-indexed) |
 
-Note: Digest-pinned image references (e.g. hash-suffixed tags or `@sha256:` references) are not used in v1. Workshop versioning and image pinning strategies will be designed as a future workstream.
+*Required when `llm` object is present.
 
-### 3. Runtime State
+## Schema: meta.json
 
-| Table | Contents |
-|---|---|
-| `runtime_state` | Per-workspace, per-step progress tracking |
-| `custom_state` | Arbitrary per-student key/value state (answers, notes, etc.) |
+Per-step metadata at `/workshop/steps/<id>/meta.json`.
 
-Runtime state is **educational progress only** — not infrastructure state. The cluster state at any step is reconstructed from the OCI image, never from runtime snapshots.
+```json
+{
+  "id": "step-pods",
+  "title": "Working with Pods",
+  "group": "basics",
+  "position": 0,
+  "hasGoss": true,
+  "hasLlm": true
+}
+```
 
-## Size Expectations
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Step identifier |
+| `title` | string | Display title |
+| `group` | string | Group for guided navigation (omitted if none) |
+| `position` | number | Display order |
+| `requires` | array | Prerequisite step IDs (omitted if none) |
+| `hasGoss` | boolean | Whether `/workshop/steps/<id>/goss.yaml` exists |
+| `hasLlm` | boolean | Whether `/workshop/steps/<id>/llm.json` exists |
 
-A typical workshop with 10 steps:
+## Schema: content.md
 
-| Component | Approximate Size |
-|---|---|
-| SQLite file | **< 5 MB** |
-| Per-step markdown | 1–20 KB each |
-| Image tags and digests | < 1 KB each |
-| Per-step goss specs | < 5 KB each |
-| Other metadata | < 1 KB per step |
+Tutorial markdown at `/workshop/steps/<id>/content.md`. Raw markdown content — resolved from either the `markdown` or `markdownFile` field in `workshop.yaml` at build time. Rendered by the frontend.
 
-The previous architecture stored Kubernetes manifest bundles and tar blobs of file state in SQLite — a typical workshop was hundreds of MB. The new schema drops all blobs. Image data lives in the registry with OCI layer deduplication; SQLite carries only references.
+## Schema: goss.yaml
+
+Goss validation spec at `/workshop/steps/<id>/goss.yaml`. Raw goss YAML — resolved from either the `goss` or `gossFile` field in `workshop.yaml`. Present only for steps that have validation.
+
+## Schema: llm.json
+
+Per-step LLM configuration at `/workshop/steps/<id>/llm.json`.
+
+```json
+{
+  "mode": "hints",
+  "context": "Common mistake: students forget the -n namespace flag.",
+  "hasDocs": true
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `mode` | string | Help mode: `hints`, `explain`, or `solve` |
+| `context` | string | Instructor-provided context for LLM prompts |
+| `hasDocs` | boolean | Whether `llm-docs/` directory exists with reference files |
+
+## Runtime Files
+
+### command-log.jsonl
+
+Append-only NDJSON file written by the [shell instrumentation](../platform/instrumentation.md) (`PROMPT_COMMAND` hook). One line per command executed in the terminal.
+
+```jsonl
+{"ts":"2025-03-15T14:22:01.123Z","cmd":"kubectl get pods","exit":0}
+{"ts":"2025-03-15T14:22:15.456Z","cmd":"kubectl apply -f deployment.yaml","exit":1}
+{"ts":"2025-03-15T14:22:30.789Z","cmd":"kubectl apply -f /workspace/deployment.yaml","exit":0}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `ts` | string | ISO 8601 UTC timestamp |
+| `cmd` | string | Command text (truncated to 1024 chars) |
+| `exit` | number | Exit code |
+
+### state-events.jsonl
+
+Append-only NDJSON file written by the backend on state transitions. This file IS the state — the backend replays it on startup to reconstruct current progress.
+
+```jsonl
+{"ts":"2025-03-15T14:20:00.000Z","event":"connected"}
+{"ts":"2025-03-15T14:20:01.000Z","event":"step_start","step":"step-pods"}
+{"ts":"2025-03-15T14:25:00.000Z","event":"goss_result","step":"step-pods","passed":false,"checks":{"total":5,"passed":2}}
+{"ts":"2025-03-15T14:28:00.000Z","event":"goss_result","step":"step-pods","passed":true,"checks":{"total":5,"passed":5}}
+{"ts":"2025-03-15T14:28:01.000Z","event":"step_start","step":"step-services"}
+{"ts":"2025-03-15T14:45:00.000Z","event":"disconnected"}
+```
+
+Event types:
+
+| Event | Fields | Description |
+|---|---|---|
+| `connected` | — | Browser WebSocket connected |
+| `disconnected` | — | Browser WebSocket disconnected |
+| `step_start` | `step` | Student navigated to a step |
+| `goss_result` | `step`, `passed`, `checks` | Validation result (student-triggered or periodic) |
+
+State reconstruction on startup:
+- Last `step_start` event → active step
+- All `goss_result` events where `passed: true` → completed set
+- Last `connected`/`disconnected` → connection state
+
+### session.cast
+
+Asciinema recording in [asciicast v2 format](https://docs.asciinema.org/manual/asciicast/v2/). Written by `asciinema rec` wrapping the terminal shell. See [Instrumentation](../platform/instrumentation.md) for details.
+
+### llm-history.jsonl
+
+Append-only NDJSON file recording LLM interactions. See [LLM Help](../platform/llm-help.md) for schema details.
+
+## State Derivation (No Separate State File)
+
+There is no `state.json` file. The backend derives current state entirely from `state-events.jsonl`:
+
+1. On startup, read `state-events.jsonl` line by line
+2. Replay events to reconstruct: active step, completed steps, connection state
+3. Continue appending new events during the session
+
+This event-sourcing approach means:
+- No state corruption from partial writes
+- Full audit trail of every state change
+- Simple recovery — just replay the file
+- In K8s mode, the same file is shipped to Postgres by Vector for aggregation
 
 ## Distribution
 
-SQLite and images are distributed separately:
+There is no separate distribution artifact. A workshop is fully portable with:
 
-| Artifact | Distribution Method |
+1. Access to the container registry where images are pushed
+2. That's it.
+
+```bash
+# Run a workshop — no CLI, no config, no database
+docker run -p 8080:8080 myorg/kubernetes-101:step-1-intro
+
+# With LLM help enabled
+docker run -p 8080:8080 -e WORKSHOP_LLM_API_KEY=sk-... myorg/kubernetes-101:step-1-intro
+```
+
+## Size Expectations
+
+The `/workshop/` metadata directory is typically under 1MB for a workshop with 10 steps:
+
+| Component | Approximate Size |
 |---|---|
-| SQLite file | Git repository, direct download, or package registry |
-| OCI images | Container registry (Docker Hub, GHCR, ECR, etc.) |
+| `workshop.json` | < 2 KB |
+| Per-step `meta.json` | < 1 KB each |
+| Per-step `content.md` | 1–20 KB each |
+| Per-step `goss.yaml` | < 5 KB each |
+| Per-step `llm.json` | < 1 KB each |
+| Per-step `llm-docs/` | 1–50 KB each |
 
-A workshop is fully portable with:
-1. The `.db` SQLite file (contains all metadata and image references)
-2. Access to the container registry where images are pushed
+The metadata is baked into one OCI layer and shared across all step images via layer deduplication.
 
-There is no need to co-locate the SQLite file with the images — the `image_tag` column contains the full registry reference.
+## Migration from SQLite
 
-## YAML Export/Import
+The previous architecture used a SQLite database as a separate distribution artifact. The flat file approach replaces it entirely:
 
-Some authors prefer Git-based declarative workflows. The platform supports:
-
-- **Export:** Workshop DB → YAML files (for version control and review)
-- **Import:** YAML files → rebuild DB (for CI/CD pipelines)
-
-The YAML export mirrors the SQLite schema: one file per table or one directory per workshop. The `image_tag` field is included, so an exported+imported workshop is ready to run without recompilation.
-
-TODO: Define the exact YAML export directory structure.
-
-## Integrity
-
-TODO: Define integrity verification — checksums? Signatures? Schema version validation on load?
-
-## Migration
-
-TODO: Define how schema migrations work when the platform evolves (new fields, new tables, format changes).
+| SQLite Concept | Flat File Replacement |
+|---|---|
+| `workshop` table | `workshop.json` |
+| `steps` table | `steps/<id>/meta.json` + `content.md` + `goss.yaml` |
+| `step_metadata` table | `steps/<id>/meta.json` fields |
+| `navigation` table | `workshop.json` `steps` array with `group`/`requires` |
+| `runtime_state` table | `state-events.jsonl` (event-sourced) |
+| `custom_state` table | Removed (not needed — state is event-sourced) |
+| Distribution file | Eliminated — metadata baked into image |
+| Per-instance working copy | Eliminated — no database to copy |
