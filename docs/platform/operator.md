@@ -13,9 +13,9 @@ The authoritative multi-tenant lifecycle engine. The Operator is the only compon
 | LimitRange | Default container resource constraints |
 | RBAC bindings | Scope user/service account permissions |
 | NetworkPolicy | Optional network isolation between workspaces |
-| Deployment | Workload container (current step's OCI image) |
+| Deployment | Workload container (current step's OCI image; ttyd runs inside as a child process of the backend) |
 | Service | Internal and external networking |
-| Access sidecars | Web terminal (ttyd) container |
+| Vector sidecar | Ships JSONL runtime data to Postgres/S3 (see [Aggregation](./aggregation.md)) |
 | vcluster | Nested Kubernetes cluster (if `cluster.mode == per-workspace`) |
 
 ## Lifecycle Management

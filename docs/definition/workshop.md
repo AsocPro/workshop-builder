@@ -67,6 +67,14 @@ This means:
 - To "start" step N, the student gets the `step-(N-1)` image
 - The CLI and operator manage this N-1 mapping — authors just define steps in order
 
+### Navigation vs Image Swap
+
+**Viewing a step's content** (reading the tutorial, looking at goss results) does NOT require an image swap. Every step image contains ALL steps' metadata under `/workshop/`. The student can read any step's tutorial and validate any step without a container restart.
+
+**An image swap** only happens when the student explicitly resets to a step or transitions to begin working on a different step. In `linear` mode, this occurs on "next step". In `free`/`guided` mode, this occurs when the student chooses to switch their working environment to a different step.
+
+TODO: Define whether the student explicitly requests "switch workspace to step N" (which triggers an image swap and container restart) vs "view step N content" (no swap). The UX distinction between these two actions must be clear. In free navigation, a student might want to read step 5's instructions while working in step 3's environment — they should be able to do this without an image swap.
+
 ## Schema
 
 ```yaml

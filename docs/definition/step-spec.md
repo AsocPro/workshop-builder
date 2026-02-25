@@ -163,7 +163,7 @@ Steps before `step-3-advanced` are loaded from the registry (or Dagger cache) ra
 | [CLI](../platform/cli.md) | SQLite (image tags) | In local mode, pulls step images and runs containers; in cluster mode, generates CRDs with image tags |
 | [Operator](../platform/operator.md) | SQLite (image tags) | Reads image tags per step; updates Deployment spec during step transitions |
 
-`step-spec.yaml` is consumed at build time only. All runtime consumers read exclusively from the [SQLite artifact](../artifact/sqlite-artifact.md).
+`step-spec.yaml` is consumed at build time only. All runtime consumers read exclusively from the [SQLite artifact](../artifact/flat-file-artifact.md).
 
 ## Validation Rules
 

@@ -151,6 +151,6 @@ The `session.cast` file is the largest by far. In K8s mode, the [Vector sidecar]
 |---|---|
 | [Base Images](./base-images.md) | bashrc and asciinema pre-installed |
 | [Backend Service](./backend-service.md) | Watches command log, manages asciinema subprocess, serves recording |
-| [Flat File Artifact](../artifact/sqlite-artifact.md) | Command log and recording live in `/workshop/runtime/` |
+| [Flat File Artifact](../artifact/flat-file-artifact.md) | Command log and recording live in `/workshop/runtime/` |
 | [Aggregation](./aggregation.md) | Vector ships JSONL + cast files to Postgres/S3 in K8s mode |
 | [Instructor Dashboard](./instructor-dashboard.md) | Displays command timeline, plays back recordings |

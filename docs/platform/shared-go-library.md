@@ -11,7 +11,7 @@ Holds the canonical types and validation logic shared across all platform compon
 - `WorkspaceInstance` structs
 - Validation rules
 - Capability matrix logic (what each backend supports)
-- CRD generation logic (workshop.yaml step image tags from SQLite → CRD objects)
+- CRD generation logic (workshop.yaml step image tags → CRD objects)
 
 ## What It Must NOT Contain
 
@@ -34,8 +34,8 @@ This keeps the library portable and testable without infrastructure dependencies
 
 ### CRD Generation
 
-- Convert parsed workshop step data + image tags (from SQLite) into Kubernetes CRD objects
-- Populate `WorkspaceTemplate.spec.steps` from SQLite image tags
+- Convert parsed workshop step data into Kubernetes CRD objects
+- Populate `WorkspaceTemplate.spec.steps` with image tags derived from `workshop.yaml` (`<workshop.image>:<step-id>`)
 - Generate `WorkspaceInstance` specs
 - Normalize field values and apply defaults
 

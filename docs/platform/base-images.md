@@ -23,7 +23,7 @@ Every base image contains:
 | goss | `/usr/local/bin/goss` | Step validation — tests student's container state |
 | asciinema | `/usr/bin/asciinema` | Terminal recording — full session capture with replay |
 | workshop-platform.bashrc | `/etc/workshop-platform.bashrc` | Shell instrumentation — PROMPT_COMMAND for command logging |
-| runtime directory | `/workshop/runtime/` | Created at startup — JSONL logs, recording, state events |
+| runtime directory | `/workshop/runtime/` | Pre-created in image; populated at runtime with JSONL logs, recording, state events |
 
 The entrypoint is pre-configured:
 

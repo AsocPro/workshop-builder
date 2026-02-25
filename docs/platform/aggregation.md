@@ -41,9 +41,9 @@ The student container has **no database credentials** and **no direct access** t
 | Student container | Local files only (`/workshop/runtime/`) |
 | Vector sidecar | Shared volume (read), Postgres credentials, S3 credentials |
 
-## Three Pipelines
+## Four Pipelines
 
-Vector runs three independent pipelines, one per file type:
+Vector runs four independent pipelines, one per file type:
 
 ### 1. Command Log Pipeline
 

@@ -12,7 +12,7 @@ Single-user execution using Docker as the backend.
 
 1. Read `workshop.yaml`
 2. Validate via [Shared Go Library](./shared-go-library.md)
-3. Read current step's `image_tag` from SQLite
+3. Resolve step image tags from `workshop.yaml` (image name + step ID)
 4. Pull step image from registry
 5. Run container from step image (`docker run`)
 6. Backend service inside container handles terminal and UI
@@ -21,13 +21,17 @@ Single-user execution using Docker as the backend.
 
 Step transitions in local mode: stop current container → pull next step image → start new container. No manifest bundles, no PVC operations.
 
+TODO: Define the step transition mechanism in Docker local mode. The backend runs inside the container and cannot restart its own container. Options: (a) student runs CLI commands from the host to transition, (b) backend exposes a transition API that the CLI watches via polling/SSE, (c) backend has access to the Docker socket (security concern). This is the most critical open design question for the single-user milestone.
+
+TODO: Define what happens to the student's browser session during a step transition in Docker mode. The container is replaced — the WebSocket connection drops. Does the frontend auto-reconnect? Does the CLI print the new URL? Is the port the same?
+
 ### Cluster Mode
 
 Multi-tenant execution against a Kubernetes cluster.
 
 1. Read `workshop.yaml`
 2. Validate
-3. Read step image tags from SQLite artifact
+3. Resolve step image tags from `workshop.yaml` (image name + step ID)
 4. Populate [WorkspaceTemplate CRD](./crds.md) step fields (via Shared Go Library)
 5. Submit WorkspaceInstance CRDs to Kubernetes API
 6. Watch status
@@ -96,36 +100,36 @@ Added step slot: step-3-advanced (will follow step-2-deploy)
 
 ### `workshop build compile`
 
-Invoke the Dagger build pipeline. Reads `workshop.yaml`, builds one OCI image per step sequentially, pushes images to the registry, and updates SQLite with image tags and digests.
+Invoke the Dagger build pipeline. Reads `workshop.yaml`, builds one OCI image per step sequentially, and pushes images to the registry. Image tags are derived deterministically from `workshop.yaml` (`<workshop.image>:<step-id>`), so no separate artifact tracking is needed.
 
 ```
 $ workshop build compile
 Building step-1-intro...     ✓  pushed myorg/kubernetes-101:step-1-intro
 Building step-2-deploy...    ✓  pushed myorg/kubernetes-101:step-2-deploy
 Building step-3-advanced...  ✓  pushed myorg/kubernetes-101:step-3-advanced
-SQLite updated: workshop.db
+Done.
 ```
 
 ### `workshop build compile --from-step <id>`
 
-Incremental recompilation starting from a specific step. Steps before `<id>` retain their existing image tags in SQLite.
+Incremental recompilation starting from a specific step. Steps before `<id>` are assumed to already exist in the registry.
 
 ```
 $ workshop build compile --from-step step-3-advanced
 Skipping step-1-intro (existing tag: myorg/kubernetes-101:step-1-intro)
 Skipping step-2-deploy (existing tag: myorg/kubernetes-101:step-2-deploy)
 Building step-3-advanced...  ✓  pushed myorg/kubernetes-101:step-3-advanced
-SQLite updated: workshop.db
+Done.
 ```
 
 ### `workshop build status`
 
-Show a summary of the current `workshop.yaml` and SQLite state.
+Show a summary of the current `workshop.yaml` and image availability.
 
 ```
 $ workshop build status
 Workshop: kubernetes-101
-Base:     ubuntu:22.04
+Base:     workshop-base:ubuntu
 
 Steps:
   [1] step-1-intro       "Introduction"        ✓ built  myorg/kubernetes-101:step-1-intro

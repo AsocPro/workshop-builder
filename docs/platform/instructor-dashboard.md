@@ -126,6 +126,8 @@ The dashboard service uses a separate auth mechanism from the student containers
 - Bearer token for simple deployments (`INSTRUCTOR_DASHBOARD_TOKEN` env var)
 - OIDC integration for production deployments (shared with cluster auth)
 
+TODO: Reconcile the auth token env var naming. Docker mode uses `WORKSHOP_INSTRUCTOR_TOKEN` (set on the student container). K8s mode uses `INSTRUCTOR_DASHBOARD_TOKEN` (set on the dashboard service). These are semantically the same concept (instructor auth) but use different names. Consider standardizing.
+
 ### API Surface
 
 | Method | Path | Description |

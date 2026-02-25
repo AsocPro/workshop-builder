@@ -42,6 +42,13 @@ The `workshop.yaml` format is the single most consequential input decision. It d
 - [ ] Define default resource values, validation behavior, and quota level — post-v1 robustness work.
 - [ ] Define how the CLI detects and selects between Docker and Podman runtimes in local mode.
 
+### 2b. Navigation vs Image Swap (CRITICAL — Cross-cutting)
+
+- [ ] **Define the distinction between "view step content" and "switch workspace to step" in the API and UX.** In free/guided mode, students must browse content without triggering a container restart. The current `POST /api/steps/:id/navigate` is ambiguous. Likely needs two separate actions.
+- [ ] **Define the step transition mechanism in Docker local mode.** The backend is inside the container and cannot restart itself. Options: CLI polling, Docker socket access, or host-side CLI commands. This blocks the single-user milestone.
+- [ ] **Define state persistence across Docker mode step transitions.** Should `/workshop/runtime/` be volume-mounted to preserve completion progress? What volume mount convention?
+- [ ] **Define browser reconnection behavior after step transitions.** The WebSocket drops when the container is replaced. Auto-reconnect? Same port?
+
 ---
 
 ## Phase 2: Artifact Pipeline (COMPLETE)
@@ -80,10 +87,11 @@ The Dagger build pipeline.
 - [ ] Define what validation occurs during the Dagger build (e.g., RUN command failure behavior).
 - [ ] Provide size estimates for typical OCI image stacks.
 - [ ] Define how the backend binary version is pinned / sourced at compile time.
+- [x] Rename `artifact/sqlite-artifact.md` to `artifact/flat-file-artifact.md` — filename was misleading since SQLite was removed.
 
 ---
 
-### 5. Flat File Artifact (`artifact/sqlite-artifact.md`)
+### 5. Flat File Artifact (`artifact/flat-file-artifact.md`)
 
 *Formerly "SQLite Artifact" — replaced by flat file design.*
 
@@ -194,6 +202,11 @@ The Go binary embedded in every step image. **The heart of single-user local mod
 - [x] Define the full API surface (student + instructor routes).
 - [x] Document connection tracking.
 - [ ] Define frontend framework and asset embedding strategy.
+- [ ] Define the step transition mechanism in Docker local mode (CRITICAL — blocks single-user milestone).
+- [ ] Define "view step" vs "transition to step" API contract — `POST /api/steps/:id/navigate` is ambiguous.
+- [ ] Define state persistence across step transitions in Docker mode (volume mount convention).
+- [ ] Define periodic goss validation configuration mechanism (env var? workshop.yaml field?).
+- [ ] Define browser auto-reconnection behavior after container replacement during step transitions.
 
 ---
 
@@ -216,6 +229,7 @@ The interface served by the backend service. Defines what students actually see 
 - [ ] Define target devices.
 - [ ] Design the LLM help panel component.
 - [ ] Design the non-linear navigation UI (completion matrix vs linear progress bar).
+- [ ] Design the UX distinction between "view step content" (no restart) and "switch workspace" (image swap + restart). Critical for free/guided navigation modes.
 
 ---
 
@@ -361,7 +375,12 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 - [x] Update image layer structure diagram.
 - [x] Update "What This Is NOT" (no SQLite, no separate artifact).
 - [x] Add base images, instrumentation, aggregation to architecture sections.
-- [ ] Review all cross-links and ensure consistency across docs.
+- [x] Review all cross-links and ensure consistency across docs.
+- [x] Remove stale SQLite references from cli.md, crds.md, shared-go-library.md, gui.md, frontend.md.
+- [x] Fix aggregation.md "three pipelines" → "four pipelines".
+- [x] Fix operator.md "access sidecars" → Vector sidecar (ttyd runs inside the container).
+- [x] Add open architectural questions section to overview.md.
+- [x] Rename `artifact/sqlite-artifact.md` to `artifact/flat-file-artifact.md`.
 
 ---
 
@@ -369,18 +388,20 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 
 | Phase | Focus | Docs | Status |
 |---|---|---|---|
-| 1 | Workshop Specification | workshop-spec, workspace-metadata | Complete |
+| 1 | Workshop Specification | workshop, workspace-metadata | Complete |
 | 2 | Artifact Pipeline | authoring, compilation, flat-file-artifact | Complete |
 | A | Base Images + Instrumentation | base-images, instrumentation | Complete |
 | B | Instructor Monitoring + LLM | instructor-dashboard, llm-help | Complete |
 | C | Aggregation (K8s) | aggregation | Complete |
-| 3 | Backend Runtime | backend-service | Mostly done (needs frontend framework) |
+| 3 | Backend Runtime | backend-service | **Blocked** — step transition mechanism in Docker mode undefined; nav vs image swap API ambiguous |
 | 4 | Student UI | frontend | Needs design |
-| 5 | CLI — Local Mode | cli (local) | Partially done |
+| 5 | CLI — Local Mode | cli (local) | **Blocked** — SQLite refs removed but step transition mechanism undefined |
 | 6 | Builder GUI | gui | Needs design |
-| **—** | **Single-User Milestone** | | |
-| 7 | Domain Model & API | shared-go-library, crds | Partially done |
+| **—** | **Single-User Milestone** | | **Blocked on: step transition mechanism, nav vs image swap, state persistence** |
+| 7 | Domain Model & API | shared-go-library, crds | Partially done (SQLite refs cleaned up) |
 | 8 | Cluster Mode | operator, cli (cluster), provisioners, backend-capabilities | Partially done |
 | 9 | Finalize | overview | Mostly done |
+
+**Critical path:** Resolve the step transition mechanism (Phase 3/5 blocker) and navigation vs image swap distinction (Phase 3/4 blocker) before continuing. These are cross-cutting decisions that affect backend, CLI, frontend, and workshop spec.
 
 Work top to bottom through Phase 6, then validate the single-user mode end-to-end before continuing.

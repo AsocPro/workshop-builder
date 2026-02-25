@@ -61,7 +61,7 @@ How workshops are compiled into portable, distributable artifacts.
 | Doc | What It Covers |
 |---|---|
 | [Compilation](./artifact/compilation.md) | Dagger build pipeline — `workshop.yaml` → OCI images with baked-in metadata |
-| [Flat File Artifact](./artifact/sqlite-artifact.md) | In-image metadata format (`/workshop/` filesystem layout) |
+| [Flat File Artifact](./artifact/flat-file-artifact.md) | In-image metadata format (`/workshop/` filesystem layout) |
 
 Compilation transforms `workshop.yaml` into a set of tagged OCI images. Each image contains the complete workshop metadata as flat files under `/workshop/` — no separate database or distribution artifact.
 
@@ -158,3 +158,15 @@ myorg/kubernetes-101:step-1-intro
 - A system that stores metadata in SQLite
 - A system with a separate distribution artifact
 - A system with an author-facing file for deployment/operator configuration
+
+## Open Architectural Questions
+
+The following questions must be resolved before implementation. They are tracked as TODOs in the relevant docs:
+
+1. **Step transition mechanism in Docker local mode.** The backend runs inside the container and cannot restart itself. How does a student's browser action (via backend API) trigger the CLI on the host to swap containers? See [CLI](./platform/cli.md) and [Backend Service](./platform/backend-service.md).
+
+2. **Navigation vs image swap UX.** In free/guided navigation, students need to view any step's content without disrupting their terminal session. The distinction between "view step" (no restart) and "switch workspace to step" (image swap) must be clear in the API and UI. See [Workshop Spec](./definition/workshop.md#navigation-vs-image-swap) and [Frontend](./presentation/frontend.md).
+
+3. **State persistence across Docker mode step transitions.** When a container is replaced, `/workshop/runtime/` is lost unless a volume is mounted. Should completion progress persist? If so, what's the volume mount convention? See [Backend Service](./platform/backend-service.md).
+
+4. **LLM API key distribution for Docker mode.** The student runs `docker run -e WORKSHOP_LLM_API_KEY=...`. Who provides the key? Is this an instructor responsibility? See [LLM Help](./platform/llm-help.md).

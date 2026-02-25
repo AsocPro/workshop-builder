@@ -17,13 +17,13 @@ Cluster-level reusable workspace definition. Represents an operator's blueprint 
 ### Contains
 
 - Operator-configured deployment defaults (lifecycle, isolation, cluster mode, resources, access)
-- Workshop step definitions (OCI image tags populated from SQLite by the CLI)
+- Workshop step definitions (OCI image tags derived from `workshop.yaml` by the CLI)
 - Image pull secrets
 
 ### Lifecycle
 
 - **Created by:** Operator/admin (writes template YAML directly and applies with kubectl or CLI tooling)
-- **Step fields populated by:** CLI (reads SQLite image tags; updates template via [Shared Go Library](./shared-go-library.md))
+- **Step fields populated by:** CLI (derives image tags from `workshop.yaml` — `<workshop.image>:<step-id>` — via [Shared Go Library](./shared-go-library.md))
 - **Consumed by:** Operator
 - **Scope:** Cluster-scoped (available across namespaces)
 
@@ -56,7 +56,7 @@ These fields are operator concerns. They define how workspaces behave at runtime
 
 #### `spec.steps` — Workshop Content (CLI-Populated)
 
-Step entries are populated by the CLI reading the SQLite artifact after a successful `workshop build compile`. Operators do not write these manually.
+Step entries are populated by the CLI, which derives image tags deterministically from `workshop.yaml` (`<workshop.image>:<step-id>`). Operators do not write these manually.
 
 | Field | Type | Description |
 |---|---|---|
@@ -104,9 +104,9 @@ spec:
       imageTag: myorg/kubernetes-101:step-2-deploy
 ```
 
-`steps[].imageTag` is populated from the SQLite artifact by the CLI at template update time. The operator reads these to perform step transitions.
+`steps[].imageTag` is derived from `workshop.yaml` by the CLI at template update time (`<workshop.image>:<step-id>`). The operator reads these to perform step transitions.
 
-Note: Digest-pinned image references are not used in v1. See [SQLite Artifact](../artifact/sqlite-artifact.md) for context.
+Note: Digest-pinned image references are not used in v1. See [Flat File Artifact](../artifact/flat-file-artifact.md) for context.
 
 TODO: Finalize which fields are overridable at WorkspaceInstance level vs locked at template level.
 

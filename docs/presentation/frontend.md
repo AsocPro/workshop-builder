@@ -16,13 +16,16 @@ Workshop participants following a guided tutorial.
 
 ## Features
 
-- Step navigation (next, previous, jump to step)
-- Reset to step (sends reset request to backend; backend triggers operator image swap or CLI container restart)
+- Step content navigation (view any step's tutorial — no container restart required)
+- Step transition / reset (switches workspace to a different step's image — triggers container restart)
 - Resume progress from last checkpoint
 - Markdown tutorial content display
 - Embedded terminal (WebSocket to ttyd, proxied through backend)
 - Validation feedback (did the student complete the step correctly?)
+- LLM help panel (chat-like interface for contextual assistance, when configured)
 - Cluster status panel (optional)
+
+TODO: Define the UX distinction between "view step content" (no image swap) and "switch workspace to step" (image swap + container restart). Students in free navigation mode need to browse step content without disrupting their terminal session. The UI must make it clear which action triggers a restart.
 
 ## Key Constraints
 
@@ -32,7 +35,7 @@ All state management, reset logic, and validation lives in the backend. The fron
 2. Displays results and content
 3. Embeds the terminal WebSocket stream
 
-The frontend does not talk to the Kubernetes API, SQLite, or any external service directly.
+The frontend does not talk to the Kubernetes API or any external service directly.
 
 ---
 

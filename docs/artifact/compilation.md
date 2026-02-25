@@ -67,7 +67,7 @@ Step 1 build:
       /workshop/steps/<id>/goss.yaml    (validation spec, if present)
       /workshop/steps/<id>/llm.json     (LLM config, if present)
       /workshop/steps/<id>/llm-docs/*   (reference docs, if present)
-  → ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+  → ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]  (only for custom bases — base images already have this)
   → push as <workshop.image>:<step-1-id>
       │
       ▼

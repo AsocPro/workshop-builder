@@ -41,7 +41,7 @@ The GUI is a presentation layer over the same core logic the CLI uses.
 
 ### Distribution
 
-- Export SQLite artifact
+- Push compiled images to registry
 - YAML import/export
 
 ### Cluster Administration

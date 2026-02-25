@@ -110,6 +110,8 @@ Because every step image contains ALL steps' goss specs, the backend can validat
 
 The backend can optionally run goss validation periodically (configurable interval, default off). Results from periodic validation are NOT shown to the student — they are written only to `state-events.jsonl` for instructor monitoring. This lets instructors see progress without students explicitly clicking Validate.
 
+TODO: Define the configuration mechanism for periodic validation interval. Environment variable (e.g., `WORKSHOP_GOSS_INTERVAL=30s`)? Or a field in `workshop.yaml`? Currently undocumented.
+
 ### Non-Linear Navigation
 
 The backend enforces navigation rules based on `workshop.json`:
@@ -121,6 +123,10 @@ The backend enforces navigation rules based on `workshop.json`:
 | `guided` | Free within unlocked groups. Groups unlock when previous group is completed or via `requires`. |
 
 Progress is tracked as a **completion set** — the set of step IDs where goss validation has passed. The frontend shows a completion matrix rather than a linear progress bar.
+
+**Important distinction:** "Navigating" to a step (viewing its tutorial content, checking its goss spec) does NOT require an image swap. Every image contains all steps' metadata. An image swap only occurs when the student explicitly requests to switch their working environment (reset/transition). See [Workshop Spec — Navigation vs Image Swap](../definition/workshop.md#navigation-vs-image-swap).
+
+TODO: Define the API contract for "view step content" vs "transition workspace to step". Currently `POST /api/steps/:id/navigate` is ambiguous — does it trigger an image swap or just change the viewed step? Likely needs two separate actions: one for viewing (no restart) and one for transitioning (container restart).
 
 ### LLM Help
 
@@ -230,6 +236,8 @@ The student's browser reconnects to the new backend. The terminal WebSocket sess
 
 Step transitions are driven by the [CLI](./cli.md): stop current container, start new container from next step image. The backend behavior is identical to cluster mode — it always starts fresh.
 
+TODO: Define the mechanism by which the student's browser (→ backend API) triggers a step transition in Docker local mode. The backend runs inside the container and cannot stop/start its own container. Either: (a) the CLI polls a backend API for transition requests, (b) the backend has Docker socket access (security concern), or (c) the student runs CLI commands from the host. This is the most critical design gap for the single-user milestone.
+
 ### State Persistence Across Transitions
 
 The `/workshop/runtime/` directory is ephemeral to the container. When a step transition creates a new container:
@@ -237,13 +245,15 @@ The `/workshop/runtime/` directory is ephemeral to the container. When a step tr
 - In K8s mode, the Vector sidecar has already shipped events to Postgres before the transition
 - In Docker mode, the CLI can optionally mount a volume for `/workshop/runtime/` to preserve history
 
+TODO: Define whether state persistence across step transitions is required for Docker mode. If state-events.jsonl is preserved via volume mount, the completed set carries over but the workspace filesystem is replaced. Is this the desired behavior? If so, document the volume mount convention. If not, how does the student's completion progress survive step transitions in Docker mode?
+
 ## Relationship to Other Components
 
 | Component | Relationship |
 |---|---|
 | [Base Images](./base-images.md) | Backend binary pre-installed in platform base images |
 | [Dagger Pipeline](../artifact/compilation.md) | Injects backend binary when using custom base images; bakes flat file metadata |
-| [Flat File Artifact](../artifact/sqlite-artifact.md) | `/workshop/` directory is the read-only metadata source |
+| [Flat File Artifact](../artifact/flat-file-artifact.md) | `/workshop/` directory is the read-only metadata source |
 | [Instrumentation](./instrumentation.md) | Shell bashrc writes command log; asciinema records terminal |
 | [LLM Help](./llm-help.md) | Backend handles LLM API calls and context assembly |
 | [Instructor Dashboard](./instructor-dashboard.md) | In K8s mode, aggregates data from multiple backends via Postgres |

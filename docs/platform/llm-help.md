@@ -194,6 +194,10 @@ The help panel is a chat-like interface in the tutorial sidebar:
 - History of previous interactions for the current step
 - Mode indicator showing current help mode (hints/explain/solve)
 
+## API Key Distribution
+
+TODO: Define who provides the LLM API key in Docker local mode. The student runs `docker run -e WORKSHOP_LLM_API_KEY=sk-...`, but students typically don't have API keys. Options: (a) instructor provides a pre-configured `docker run` command, (b) the CLI wraps the run command and injects the key from its own config, (c) LLM help is instructor-only in Docker mode. This affects both UX and security.
+
 ## When LLM Is Not Configured
 
 If `workshop.llm` is not present in `workshop.yaml`:
@@ -212,5 +216,5 @@ The workshop functions exactly as it would without LLM support. LLM is purely ad
 | [Workshop Spec](../definition/workshop.md) | `llm` config in workshop.yaml drives compilation |
 | [Backend Service](./backend-service.md) | Handles LLM API calls and serves help endpoints |
 | [Instrumentation](./instrumentation.md) | Command log provides context for LLM prompts |
-| [Flat File Artifact](../artifact/sqlite-artifact.md) | `llm.json` and `llm-docs/` baked into image |
+| [Flat File Artifact](../artifact/flat-file-artifact.md) | `llm.json` and `llm-docs/` baked into image |
 | [Aggregation](./aggregation.md) | Vector ships LLM history to Postgres in K8s mode |
