@@ -24,7 +24,7 @@ The `workshop.yaml` format is the single most consequential input decision. It d
 - [x] Document incremental rebuild strategy (`--from-step`).
 - [x] Add `markdown` / `markdownFile` fields per step.
 - [x] Clarify file deletion — explicit `rm` commands only.
-- [x] Rename workshop.yaml → workshop.yaml (done; step-spec.md marked superseded).
+- [x] Rename workshop.yaml → workshop.yaml (done; step-spec.md removed).
 - [x] Add navigation modes (`linear`, `free`, `guided`) and step `group`/`requires` fields.
 - [x] Add workshop-level and per-step LLM configuration.
 - [x] Drop all SQLite references — metadata baked as flat files into image.
@@ -32,9 +32,9 @@ The `workshop.yaml` format is the single most consequential input decision. It d
 
 ---
 
-### 2. Workspace Metadata (`definition/workspace-metadata.md`)
+### 2. Workspace Metadata (REMOVED)
 
-**DISSOLVED.** Lifecycle, isolation, cluster mode, resources, and access are now operator configuration in the WorkspaceTemplate CRD. There is no author-facing `workspace.yaml` file. `workspace-metadata.md` is now a tombstone pointing to `crds.md`.
+Fields moved to the [WorkspaceTemplate CRD](../platform/crds.md). No author-facing `workspace.yaml` file.
 
 - [x] Dissolve workspace-metadata.md — fields moved to WorkspaceTemplate CRD.
 - [x] Remove workspace.yaml as an author-facing file entirely.
@@ -87,7 +87,7 @@ The Dagger build pipeline.
 - [ ] Define what validation occurs during the Dagger build (e.g., RUN command failure behavior).
 - [ ] Provide size estimates for typical OCI image stacks.
 - [ ] Define how the backend binary version is pinned / sourced at compile time.
-- [x] Rename `artifact/sqlite-artifact.md` to `artifact/flat-file-artifact.md` — filename was misleading since SQLite was removed.
+- [x] Rename `artifact/sqlite-artifact.md` to `artifact/flat-file-artifact.md` (done).
 
 ---
 
@@ -388,7 +388,7 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 
 | Phase | Focus | Docs | Status |
 |---|---|---|---|
-| 1 | Workshop Specification | workshop, workspace-metadata | Complete |
+| 1 | Workshop Specification | workshop | Complete |
 | 2 | Artifact Pipeline | authoring, compilation, flat-file-artifact | Complete |
 | A | Base Images + Instrumentation | base-images, instrumentation | Complete |
 | B | Instructor Monitoring + LLM | instructor-dashboard, llm-help | Complete |
