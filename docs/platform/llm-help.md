@@ -6,35 +6,39 @@ A help button in the tutorial panel that reads the student's command history, go
 
 ## Configuration
 
-LLM help is configured in `workshop.yaml` at two levels:
+LLM help is configured at two levels:
 
-### Workshop-Level (Required for LLM to be active)
+### Operator-Level (Required for LLM to be active)
+
+LLM provider configuration is an operator concern, set in the [WorkspaceTemplate CRD](./crds.md):
 
 ```yaml
-workshop:
-  llm:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
-    apiKeyEnv: WORKSHOP_LLM_API_KEY
-    maxTokens: 1024
-    defaultMode: hints
+spec:
+  defaults:
+    llm:
+      provider: anthropic
+      model: claude-sonnet-4-20250514
+      apiKeyEnv: WORKSHOP_LLM_API_KEY
+      maxTokens: 1024
+      defaultMode: hints
 ```
 
-### Per-Step (Optional Overrides)
+If no `llm` config is present in the WorkspaceTemplate, the help button is not shown.
+
+### Per-Step (Author-Configured)
+
+Authors configure per-step help context in `workshop.yaml`:
 
 ```yaml
 steps:
   - id: step-pods
     llm:
-      mode: hints
       context: |
         Common mistake: students forget the -n namespace flag.
         The correct namespace for this exercise is "workshop".
       docs:
         - ./docs/kubectl-cheatsheet.md
 ```
-
-If no workshop-level `llm` config is present, the help button is not shown.
 
 ## Help Modes
 
@@ -44,7 +48,7 @@ If no workshop-level `llm` config is present, the help button is not shown.
 | `explain` | Explains concepts and shows related examples, but not the exact solution. | When understanding "why" matters more than "how". |
 | `solve` | Provides direct solutions with explanation. | When the learning is in understanding the solution, not finding it. |
 
-The mode is set per-step (via `llm.mode`) with a workshop-level default (via `llm.defaultMode`). If neither is set, `hints` is used.
+The mode is set by the operator (via `llm.defaultMode` in the WorkspaceTemplate). If not set, `hints` is used.
 
 ## Context Assembly
 
@@ -148,8 +152,8 @@ Returns previous LLM interactions for the current step:
 The backend includes an LLM client that calls the Anthropic Messages API:
 
 - Streaming responses via SSE
-- Configurable model and max tokens from `workshop.json`
-- API key read from environment variable (specified by `apiKeyEnv` in config)
+- Configurable model and max tokens from operator config
+- API key read from environment variable (specified by `apiKeyEnv` in WorkspaceTemplate)
 - Retry with exponential backoff on transient errors
 - Timeout after 30 seconds (configurable)
 
@@ -192,7 +196,6 @@ The help panel is a chat-like interface in the tutorial sidebar:
 - Free-text input for student questions
 - Streaming response display (tokens appear as they arrive)
 - History of previous interactions for the current step
-- Mode indicator showing current help mode (hints/explain/solve)
 
 ## API Key Distribution
 
@@ -200,9 +203,8 @@ TODO: Define who provides the LLM API key in Docker local mode. The student runs
 
 ## When LLM Is Not Configured
 
-If `workshop.llm` is not present in `workshop.yaml`:
+If no `llm` config is present in the WorkspaceTemplate:
 
-- No `llm.json` files are generated during compilation
 - The help button is not rendered in the UI
 - The `/api/llm/*` endpoints return `404 Not Found`
 - No LLM-related files appear in `/workshop/runtime/`
@@ -213,7 +215,8 @@ The workshop functions exactly as it would without LLM support. LLM is purely ad
 
 | Component | Relationship |
 |---|---|
-| [Workshop Spec](../definition/workshop.md) | `llm` config in workshop.yaml drives compilation |
+| [Workshop Spec](../definition/workshop.md) | Per-step `llm` config (mode, context, docs) in workshop.yaml |
+| [WorkspaceTemplate CRD](./crds.md) | LLM provider config (provider, model, apiKeyEnv) |
 | [Backend Service](./backend-service.md) | Handles LLM API calls and serves help endpoints |
 | [Instrumentation](./instrumentation.md) | Command log provides context for LLM prompts |
 | [Flat File Artifact](../artifact/flat-file-artifact.md) | `llm.json` and `llm-docs/` baked into image |

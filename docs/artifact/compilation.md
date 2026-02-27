@@ -44,7 +44,7 @@ The pipeline builds on top of [platform base images](../platform/base-images.md)
 
 Base images include: tini, workshop-backend binary (with embedded web UI), goss, asciinema, and shell instrumentation (`/etc/workshop-platform.bashrc`). Authors `FROM workshop-base:<distro>` and layer on their content.
 
-When the author specifies a custom `base.image` or `base.containerFile` (not a `workshop-base:*` image), the pipeline injects the platform layer automatically.
+When the author specifies a custom `base.image` or `base.containerFile` (not a `workshop-base:*` image), the author must install the required platform components themselves. The pipeline validates their presence before building. See [Base Images — Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements).
 
 ## Dagger Pipeline
 
@@ -56,7 +56,7 @@ workshop-base:<distro> (or custom base.image / base.containerFile)
       ▼
 Step 1 build:
   FROM base
-  → if custom base: inject platform layer (tini + backend + goss + asciinema + bashrc)
+  → validate platform components present (if custom base)
   → COPY / write files (from files[] entries)
   → ENV (from env map)
   → RUN commands (from commands[])
@@ -67,7 +67,7 @@ Step 1 build:
       /workshop/steps/<id>/goss.yaml    (validation spec, if present)
       /workshop/steps/<id>/llm.json     (LLM config, if present)
       /workshop/steps/<id>/llm-docs/*   (reference docs, if present)
-  → ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]  (only for custom bases — base images already have this)
+  → verify ENTRYPOINT is set (custom bases must set this themselves)
   → push as <workshop.image>:<step-1-id>
       │
       ▼
@@ -105,13 +105,6 @@ The pipeline generates `/workshop/workshop.json` from `workshop.yaml`:
   "name": "explore-kubernetes",
   "image": "myorg/explore-kubernetes",
   "navigation": "free",
-  "llm": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514",
-    "apiKeyEnv": "WORKSHOP_LLM_API_KEY",
-    "maxTokens": 1024,
-    "defaultMode": "hints"
-  },
   "steps": [
     {"id": "step-pods", "title": "Working with Pods", "group": "basics", "position": 0},
     {"id": "step-services", "title": "Services & Networking", "group": "basics", "position": 1},
@@ -142,7 +135,6 @@ For each step, the pipeline writes:
 **`/workshop/steps/<id>/llm.json`**: resolved from step-level `llm` config (if present):
 ```json
 {
-  "mode": "hints",
   "context": "Common mistake: students forget the -n namespace flag.",
   "hasDocs": true
 }
@@ -150,25 +142,11 @@ For each step, the pipeline writes:
 
 **`/workshop/steps/<id>/llm-docs/`**: directory containing copies of files referenced by `llm.docs` entries (if present).
 
-## Platform Layer Injection
+## Custom Base Image Validation
 
-When building from a `workshop-base:*` image, the platform layer is already present — no injection needed.
+When building from a `workshop-base:*` image, all platform components are pre-installed — no validation needed.
 
-When building from a custom base image, the pipeline adds:
-
-```
-Custom base image layers
-  (author's Containerfile or base.image)
-          │
-          ▼
-Platform layer (injected by Dagger):
-  - /sbin/tini
-  - /usr/local/bin/workshop-backend  (embedded web UI assets)
-  - /usr/local/bin/goss
-  - /usr/bin/asciinema
-  - /etc/workshop-platform.bashrc    (PROMPT_COMMAND instrumentation)
-  ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
-```
+When building from a custom base image (`base.image` or `base.containerFile`), the pipeline validates that required platform components are present before building any steps. If a required binary is missing, the build fails immediately with a clear error. The pipeline does **not** attempt to inject the platform layer automatically — authors are responsible for installing components in their custom base. See [Base Images — Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements) for the full list.
 
 ## Incremental Rebuilds
 

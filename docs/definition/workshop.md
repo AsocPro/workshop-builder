@@ -4,7 +4,7 @@
 
 The sole author-facing configuration file. Defines the container image build recipe for every workshop step, tutorial content, validation specs, navigation structure, and LLM help configuration. This is what authors write, commit to Git, and hand to the build pipeline.
 
-`workshop.yaml` describes **what each step looks like when completed** (files, environment, commands), **what students read** (markdown tutorial content), **how students navigate** (linear, free, or guided), and **how the LLM help system behaves** (provider, model, per-step context). Deployment behavior — lifecycle, isolation, cluster mode, resources, access — is operator configuration and lives in the [WorkspaceTemplate CRD](../platform/crds.md), not here.
+`workshop.yaml` describes **what each step looks like when completed** (files, environment, commands), **what students read** (markdown tutorial content), **how students navigate** (linear, free, or guided), and **per-step LLM help behavior** (context, reference docs). Deployment behavior — lifecycle, isolation, cluster mode, resources, access, LLM provider configuration — is operator configuration and lives in the [WorkspaceTemplate CRD](../platform/crds.md), not here.
 
 ## What It Contains
 
@@ -17,7 +17,6 @@ The sole author-facing configuration file. Defines the container image build rec
 - Per-step goss validation specs (inline or sourced from local files)
 - Per-step LLM help configuration (mode, context, reference docs)
 - Step identifiers, titles, ordering, groups, and prerequisites
-- Workshop-level LLM configuration (provider, model, API key env var)
 
 ## What It Does NOT Contain
 
@@ -26,6 +25,7 @@ The sole author-facing configuration file. Defines the container image build rec
 - Cluster provisioning config
 - Quotas or resource classes
 - Access surface configuration
+- LLM provider configuration (provider, model, API key)
 - API keys or secrets (injected via env vars at runtime)
 
 These are operator concerns configured in the [WorkspaceTemplate CRD](../platform/crds.md).
@@ -59,21 +59,25 @@ Every step image contains ALL steps' metadata (tutorial content, goss specs, LLM
 
 Each step's spec (`files`, `env`, `commands`) describes the **completed state** of that step — what the container should look like *after* the student has finished the step's objectives. The built image for each step is the reference implementation.
 
-When a student begins step N, they receive the **step N-1 completed image** (or the base image for step 1). The tutorial markdown tells them what to do, the goss spec validates that they did it correctly, and the step N image exists as the known-good reference state they can reset to if needed.
+A student's initial container is launched from the **base image** (or the step N-1 image if they're joining mid-workshop). From that single running container, the student can navigate through every step — reading instructions, making changes, and validating — without any container restart.
+
+The per-step images exist as **known-good reference states**. They are only used when a student explicitly requests a **reset** to a specific step, which replaces their running container with that step's image.
 
 This means:
 - `step-1` image = the container after step 1 is completed correctly
+- A student can complete the entire workshop from a single container — no image swap is required during normal progression
+- Image swaps happen **only on explicit reset** (e.g., "reset to step 3" replaces the container with the `step-3` image)
 - To "start" step 1, the student gets the `base` image
 - To "start" step N, the student gets the `step-(N-1)` image
 - The CLI and operator manage this N-1 mapping — authors just define steps in order
 
-### Navigation vs Image Swap
+### Navigation vs Reset
 
-**Viewing a step's content** (reading the tutorial, looking at goss results) does NOT require an image swap. Every step image contains ALL steps' metadata under `/workshop/`. The student can read any step's tutorial and validate any step without a container restart.
+**Navigating between steps** — reading tutorials, viewing goss results, tracking progress — never triggers a container restart. Every step image contains ALL steps' metadata under `/workshop/`, so the student can read any step's instructions and validate any step from their current running container. A student can complete the entire workshop without a single image swap.
 
-**An image swap** only happens when the student explicitly resets to a step or transitions to begin working on a different step. In `linear` mode, this occurs on "next step". In `free`/`guided` mode, this occurs when the student chooses to switch their working environment to a different step.
+**A reset** replaces the running container with a specific step's image. This is an explicit, student-initiated action (e.g., "reset to step 3") that discards the current workspace state and starts fresh from that step's known-good reference state. Resets are useful when a student's environment is in a broken state and they want a clean starting point.
 
-TODO: Define whether the student explicitly requests "switch workspace to step N" (which triggers an image swap and container restart) vs "view step N content" (no swap). The UX distinction between these two actions must be clear. In free navigation, a student might want to read step 5's instructions while working in step 3's environment — they should be able to do this without an image swap.
+In practice, most students will never need a reset. The normal workflow is: read the tutorial, make changes in the workspace, validate with goss, move on to the next step's instructions — all within the same container.
 
 ## Schema
 
@@ -84,12 +88,6 @@ workshop:
   name: <workshop-name>          # workshop identifier
   image: <org/repo>              # base image name; step ID appended as tag
   navigation: <linear|free|guided>  # navigation mode (default: linear)
-  llm:                           # workshop-level LLM config (optional)
-    provider: <anthropic>        # LLM provider
-    model: <model-id>            # model identifier
-    apiKeyEnv: <ENV_VAR_NAME>    # env var containing API key (injected at runtime)
-    maxTokens: <number>          # max response tokens (default: 1024)
-    defaultMode: <hints|explain|solve>  # default help mode (default: hints)
 
 base:
   image: <registry/image:tag>    # starting layer for step 1
@@ -120,8 +118,7 @@ steps:
       <goss spec content>
     # OR:
     gossFile: <relative local path>   # path to goss.yaml file, relative to workshop.yaml (optional)
-    llm:                         # per-step LLM config override (optional)
-      mode: <hints|explain|solve>  # help mode for this step
+    llm:                         # per-step LLM help config (optional)
       context: |                   # instructor-provided context for the LLM
         <hints about common mistakes, gotchas, etc.>
       docs:                        # reference docs to include in LLM context
@@ -136,14 +133,13 @@ steps:
 | `workshop.name` | string | Yes | Workshop identifier |
 | `workshop.image` | string | Yes | Base image name for tag generation (e.g. `myorg/kubernetes-101`) |
 | `workshop.navigation` | string | No | Navigation mode: `linear` (default), `free`, or `guided` |
-| `workshop.llm` | object | No | Workshop-level LLM help configuration |
 | `base.image` | string | No | Starting image for step 1 build (e.g. `workshop-base:ubuntu`) |
 | `base.containerFile` | string | No | Path to a Containerfile/Dockerfile for building the base layer (relative to `workshop.yaml`) |
 | `steps` | list | Yes | Ordered list of step build specs |
 
 `base.image` and `base.containerFile` are mutually exclusive — specify one or the other, not both. Exactly one must be present.
 
-When using a [base image](../platform/base-images.md) (e.g. `workshop-base:ubuntu`), all platform tooling (tini, backend binary, goss, asciinema, shell instrumentation) is pre-installed. When using a custom `base.image` or `base.containerFile`, the compilation pipeline injects the platform layer automatically.
+When using a [base image](../platform/base-images.md) (e.g. `workshop-base:ubuntu`), all platform tooling (tini, backend binary, goss, asciinema, shell instrumentation) is pre-installed. When using a custom `base.image` or `base.containerFile`, the author is responsible for installing the required platform components — see [Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements).
 
 ### Navigation Modes
 
@@ -182,23 +178,14 @@ If neither `requires` nor `group` is set on a step, it is always accessible in `
 
 `goss` and `gossFile` are mutually exclusive — specify one or the other, not both. At compile time, the resolved spec is written to `/workshop/steps/<id>/goss.yaml` in the image.
 
-### LLM Configuration
+### LLM Help Configuration
 
-Workshop-level `llm` fields:
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `provider` | string | Yes | LLM provider (`anthropic`) |
-| `model` | string | Yes | Model identifier (e.g. `claude-sonnet-4-20250514`) |
-| `apiKeyEnv` | string | Yes | Environment variable name containing the API key |
-| `maxTokens` | number | No | Maximum response tokens (default: 1024) |
-| `defaultMode` | string | No | Default help mode: `hints` (default), `explain`, or `solve` |
+LLM provider configuration (provider, model, API key, max tokens, default mode) is an operator concern configured in the [WorkspaceTemplate CRD](../platform/crds.md). Authors configure only the per-step help behavior in `workshop.yaml`.
 
 Per-step `llm` fields:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `mode` | string | No | Override help mode for this step |
 | `context` | string | No | Instructor-provided context (common mistakes, hints) included in LLM prompts |
 | `docs` | list | No | Relative paths to reference doc files; baked into image at `/workshop/steps/<id>/llm-docs/` |
 
@@ -206,8 +193,6 @@ LLM help modes:
 - `hints` — nudges and leading questions, never gives the answer directly
 - `explain` — explains concepts and shows related examples, but not the exact solution
 - `solve` — provides direct solutions (use sparingly, for steps where the learning is in understanding, not discovering)
-
-The API key is **never baked into the image** — it is injected via environment variable at runtime (`docker run -e WORKSHOP_LLM_API_KEY=... <image>`).
 
 See [LLM Help](../platform/llm-help.md) for full details on context assembly and the help API.
 
@@ -246,7 +231,7 @@ Each step is built and pushed with a single tag. The image represents the **comp
 |---|---|---|
 | `<workshop.image>:<step-id>` | `myorg/kubernetes-101:step-1-intro` | Completed reference state for this step |
 
-When a student needs to start step N, the platform pulls `step-(N-1)` — the image where the previous step is already completed. For step 1, the base image is used.
+Students begin the workshop from the base image and work through all steps in a single container. Step images are used **only for explicit resets** — when a student requests a reset to step N, the platform replaces their container with the `step-N` image (or `step-(N-1)` if they want to re-do step N from scratch). For the initial workshop launch, the base image is used.
 
 Note: Digest-pinned tags and workshop versioning strategies are deferred to a future workstream. The `<step-id>` tag is sufficient for v1.
 
@@ -321,7 +306,6 @@ The [Shared Go Library](../platform/shared-go-library.md) validates `workshop.ya
 | A step `requires` references a non-existent step ID | `steps[<n>].requires: unknown step "<id>"` |
 | A step `requires` creates a cycle | `steps[<n>].requires: circular dependency detected` |
 | `workshop.navigation` is `linear` but steps have `group` or `requires` | `steps[<n>].group: not allowed in linear navigation mode` |
-| `workshop.llm.apiKeyEnv` is missing when `llm` is configured | `workshop.llm.apiKeyEnv: required when llm is configured` |
 | A step `llm.docs` path does not exist | `steps[<n>].llm.docs[<m>]: file not found: <path>` |
 | A file entry has neither `content` nor `source` | `steps[<n>].files[<m>]: exactly one of content or source is required` |
 | A file entry has both `content` and `source` | `steps[<n>].files[<m>]: content and source are mutually exclusive` |
@@ -483,18 +467,14 @@ steps:
 
 ### Workshop with LLM Help
 
+Per-step LLM help configuration. The LLM provider, model, and API key are configured by the operator in the [WorkspaceTemplate CRD](../platform/crds.md).
+
 ```yaml
 version: v1
 
 workshop:
   name: kubernetes-101
   image: myorg/kubernetes-101
-  llm:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
-    apiKeyEnv: WORKSHOP_LLM_API_KEY
-    maxTokens: 1024
-    defaultMode: hints
 
 base:
   image: workshop-base:ubuntu
@@ -505,7 +485,6 @@ steps:
     markdownFile: ./docs/pods.md
     gossFile: ./goss/pods.yaml
     llm:
-      mode: hints
       context: |
         Common mistake: students forget the -n namespace flag.
         The correct namespace for this exercise is "workshop".
@@ -517,7 +496,6 @@ steps:
     markdownFile: ./docs/services.md
     gossFile: ./goss/services.yaml
     llm:
-      mode: explain
       context: |
         Students often confuse ClusterIP and NodePort service types.
       docs:
@@ -592,4 +570,4 @@ steps:
           mode: "0755"
 ```
 
-When using a custom base image (not a `workshop-base:*` image), the Dagger pipeline automatically injects the platform layer (tini, backend binary, goss, asciinema, shell instrumentation).
+When using a custom base image (not a `workshop-base:*` image), the author must install the required platform components manually. See [Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements) for details.

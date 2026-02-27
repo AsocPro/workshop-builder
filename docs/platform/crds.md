@@ -44,6 +44,11 @@ These fields are operator concerns. They define how workspaces behave at runtime
 | `resources.cpu` | string | CPU limit per container (e.g. `500m`) — not enforced in v1 |
 | `resources.memory` | string | Memory limit per container (e.g. `512Mi`) — not enforced in v1 |
 | `access.webTerminal` | bool | Enable browser-based terminal via ttyd |
+| `llm.provider` | string | LLM provider (e.g. `anthropic`) |
+| `llm.model` | string | Model identifier (e.g. `claude-sonnet-4-20250514`) |
+| `llm.apiKeyEnv` | string | Environment variable name containing the API key |
+| `llm.maxTokens` | number | Maximum response tokens (default: 1024) |
+| `llm.defaultMode` | `hints \| explain \| solve` | Help mode for LLM responses (default: `hints`) |
 
 **`cluster.mode` values:**
 - `none` — workload runs directly in the workspace namespace, no nested cluster
@@ -90,6 +95,12 @@ spec:
       memory: "512Mi"
     access:
       webTerminal: true
+    llm:
+      provider: anthropic
+      model: claude-sonnet-4-20250514
+      apiKeyEnv: WORKSHOP_LLM_API_KEY
+      maxTokens: 1024
+      defaultMode: hints
 
   imagePullSecrets:
     - name: registry-credentials

@@ -61,13 +61,6 @@ The top-level workshop identity and step manifest.
   "name": "explore-kubernetes",
   "image": "myorg/explore-kubernetes",
   "navigation": "free",
-  "llm": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514",
-    "apiKeyEnv": "WORKSHOP_LLM_API_KEY",
-    "maxTokens": 1024,
-    "defaultMode": "hints"
-  },
   "steps": [
     {
       "id": "step-pods",
@@ -97,12 +90,6 @@ The top-level workshop identity and step manifest.
 | `name` | string | Yes | Workshop identifier |
 | `image` | string | Yes | Image name used for tag generation |
 | `navigation` | string | Yes | `linear`, `free`, or `guided` |
-| `llm` | object | No | Workshop-level LLM configuration (omitted if LLM not configured) |
-| `llm.provider` | string | Yes* | LLM provider |
-| `llm.model` | string | Yes* | Model identifier |
-| `llm.apiKeyEnv` | string | Yes* | Env var name for API key |
-| `llm.maxTokens` | number | No | Max response tokens |
-| `llm.defaultMode` | string | No | Default help mode |
 | `steps` | array | Yes | Ordered list of step references |
 | `steps[].id` | string | Yes | Step identifier (matches directory name under `steps/`) |
 | `steps[].title` | string | Yes | Display title |
@@ -110,7 +97,7 @@ The top-level workshop identity and step manifest.
 | `steps[].requires` | array | No | Prerequisite step IDs |
 | `steps[].position` | number | Yes | Display order (0-indexed) |
 
-*Required when `llm` object is present.
+LLM provider configuration (provider, model, API key, max tokens, default mode) is not baked into the image — it is an operator concern configured in the [WorkspaceTemplate CRD](../platform/crds.md) and injected at runtime.
 
 ## Schema: meta.json
 
@@ -151,7 +138,6 @@ Per-step LLM configuration at `/workshop/steps/<id>/llm.json`.
 
 ```json
 {
-  "mode": "hints",
   "context": "Common mistake: students forget the -n namespace flag.",
   "hasDocs": true
 }
@@ -159,7 +145,6 @@ Per-step LLM configuration at `/workshop/steps/<id>/llm.json`.
 
 | Field | Type | Description |
 |---|---|---|
-| `mode` | string | Help mode: `hints`, `explain`, or `solve` |
 | `context` | string | Instructor-provided context for LLM prompts |
 | `hasDocs` | boolean | Whether `llm-docs/` directory exists with reference files |
 

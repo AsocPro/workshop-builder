@@ -105,9 +105,41 @@ base:
   containerFile: ./Containerfile.base
 ```
 
-When a custom base is used, the [Dagger pipeline](../artifact/compilation.md) automatically injects the platform layer (tini, backend, goss, asciinema, bashrc, entrypoint). Authors get the same runtime behavior without using a `workshop-base:*` image.
+When using a custom base image, the author is responsible for installing all required platform components. The Dagger pipeline does **not** attempt to inject the platform layer — different distros have different package managers, library paths, and shell configurations, making automatic injection unreliable.
 
 The tradeoff: custom base images don't benefit from OCI layer deduplication with other workshops. Each workshop has its own unique base layers.
+
+### Custom Base Image Requirements
+
+The following components must be present in the custom base image for the workshop platform to function. All binaries are available as static downloads from the platform release artifacts.
+
+| Component | Required Path | Purpose | Notes |
+|---|---|---|---|
+| tini | `/sbin/tini` | PID 1 init — zombie reaping, signal forwarding | Static binary; download from [tini releases](https://github.com/krallin/tini/releases) |
+| workshop-backend | `/usr/local/bin/workshop-backend` | Runtime engine — web UI, API, terminal proxy | Static Go binary with embedded assets; provided by platform releases |
+| goss | `/usr/local/bin/goss` | Step validation | Static binary; download from [goss releases](https://github.com/goss-org/goss/releases). Only required if any step uses `goss` or `gossFile`. |
+| asciinema | `/usr/bin/asciinema` | Terminal session recording | Python package or static build. Only required if session recording is enabled. |
+| workshop-platform.bashrc | `/etc/workshop-platform.bashrc` | Shell instrumentation for command logging | Plain shell script; provided by platform releases |
+
+Additionally, the custom base image must:
+
+1. **Source the shell instrumentation** — add to `/etc/bash.bashrc` (or equivalent):
+   ```bash
+   [ -f /etc/workshop-platform.bashrc ] && . /etc/workshop-platform.bashrc
+   ```
+2. **Set the entrypoint**:
+   ```dockerfile
+   ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+   ```
+3. **Set the working directory**:
+   ```dockerfile
+   WORKDIR /workspace
+   ```
+4. **Have bash installed** — the terminal proxy and shell instrumentation require bash.
+
+### Validation
+
+The `workshop build compile` command validates that the required components exist in the base image before building steps. If a required binary is missing, the build fails with a clear error message indicating which component is absent and where to obtain it.
 
 ## Building Base Images
 
@@ -147,7 +179,7 @@ ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
 
 | Component | Relationship |
 |---|---|
-| [Dagger Pipeline](../artifact/compilation.md) | Builds workshop images on top of base images; injects platform layer for custom bases |
+| [Dagger Pipeline](../artifact/compilation.md) | Builds workshop images on top of base images; validates platform components for custom bases |
 | [Backend Service](./backend-service.md) | Pre-installed in base images; the runtime engine |
 | [Instrumentation](./instrumentation.md) | Shell bashrc pre-installed; enables command logging |
 | [Workshop Spec](../definition/workshop.md) | `base.image` field references a base image |

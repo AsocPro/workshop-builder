@@ -6,7 +6,7 @@ A Go binary embedded in every workshop container image. It is the runtime engine
 
 ## Role in the System
 
-The backend binary is pre-installed in [base images](./base-images.md) or injected by the [Dagger compilation pipeline](../artifact/compilation.md) when using custom base images. It is platform infrastructure, not workshop content — authors do not configure it directly.
+The backend binary is pre-installed in [base images](./base-images.md). When using custom base images, the author must install it manually — see [Custom Base Image Requirements](./base-images.md#custom-base-image-requirements). It is platform infrastructure, not workshop content — authors do not configure it directly.
 
 The backend is PID 2 in the workspace container, launched by tini:
 
@@ -213,7 +213,7 @@ Authors `FROM workshop-base:ubuntu` and everything is ready.
 
 ### Custom Base Images
 
-When authors use a custom `base.image` or `base.containerFile`, the Dagger pipeline injects the platform layer automatically. See [Compilation](../artifact/compilation.md) for details.
+When authors use a custom `base.image` or `base.containerFile`, they must install the backend binary and other platform components manually. See [Custom Base Image Requirements](./base-images.md#custom-base-image-requirements) for the full list.
 
 ## What It Does NOT Do
 
