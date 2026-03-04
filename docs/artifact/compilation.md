@@ -94,7 +94,7 @@ The `/workshop/` directory is baked into the first step image and inherited by a
 - LLM context assembly — the help system can reference any step's configuration
 - Progress tracking — the backend knows the full step graph for completion tracking
 
-The metadata is written once (in the step 1 build) and inherited unchanged through OCI layers. Subsequent steps only add their `/workspace/` content changes.
+The metadata is written once (in the step 0 build) and inherited unchanged through OCI layers. Subsequent steps only add their `/workspace/` content changes.
 
 ### Workshop.json Generation
 
@@ -150,15 +150,7 @@ When building from a custom base image (`base.image` or `base.containerFile`), t
 
 ## Incremental Rebuilds
 
-The `--from-step <id>` flag starts the pipeline at a specific step, treating all preceding step images as already built. Only the specified step and all steps after it are rebuilt.
-
-```
-workshop build compile --from-step step-3-advanced
-```
-
-Steps before `step-3-advanced` retain their existing tags. Steps from `step-3-advanced` onward are rebuilt.
-
-Dagger's own layer cache provides a second level of incrementality: if a step's inputs (files, env, commands, and parent image) are unchanged, Dagger skips the rebuild entirely even without `--from-step`.
+Dagger's cache provides incremental builds natively: if a step's inputs (files, env, commands, and parent image) are unchanged, Dagger skips the rebuild of that layer. 
 
 ## Validation During Compilation
 
