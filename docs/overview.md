@@ -43,7 +43,7 @@ Shared logic, orchestration, and runtime enforcement. This is the system that ac
 | [Base Images](./platform/base-images.md) | Platform foundation layers (`workshop-base:{alpine,ubuntu,centos}`) with all tooling pre-installed |
 | [Instrumentation](./platform/instrumentation.md) | Shell command logging (PROMPT_COMMAND) and asciinema terminal recording |
 | [LLM Help](./platform/llm-help.md) | Contextual student assistance — reads command history + goss results + docs, gives hints |
-| [Instructor Dashboard](./platform/instructor-dashboard.md) | Real-time instructor visibility — Docker (local) and Kubernetes (aggregated) modes |
+| [Instructor Dashboard](./platform/instructor-dashboard.md) | Real-time instructor visibility across all workspaces — Kubernetes mode only |
 | [Aggregation](./platform/aggregation.md) | Vector sidecar ships JSONL to Postgres/S3 in Kubernetes mode |
 | [Infrastructure Provisioners](./platform/infrastructure-provisioners.md) | k3d, vcluster orchestration |
 | [Backend Capabilities](./platform/backend-capabilities.md) | Docker vs Kubernetes feature matrix |
@@ -121,8 +121,8 @@ Author creates:
    - replays state events     - deploys step image with Vector sidecar
    - spawns ttyd+asciinema    - manages lifecycle
    - serves student web UI    - step transitions via image swap
-   - serves instructor view       │
-   - writes JSONL files        Backend starts (same image, same behavior)
+   - writes JSONL files           │
+                               Backend starts (same image, same behavior)
                                  - writes JSONL files
                                  - Vector sidecar ships to Postgres/S3
                                  - Instructor dashboard aggregates

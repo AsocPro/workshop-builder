@@ -103,7 +103,7 @@ The recording uses [asciicast v2 format](https://docs.asciinema.org/manual/ascii
 
 ### File Serving
 
-The backend serves `session.cast` at `GET /api/instructor/recording` with HTTP Range support. This enables:
+The backend serves `session.cast` at `GET /api/recording` with HTTP Range support. This enables:
 
 - The [asciinema-player](https://docs.asciinema.org/manual/player/) web component to seek to any point in the recording
 - Efficient streaming — the player doesn't need to download the entire file
@@ -129,7 +129,7 @@ The backend watches `command-log.jsonl` using fsnotify (or periodic tail-read as
 1. On file change notification, read new lines from the last known offset
 2. Parse each new NDJSON line
 3. Push to in-memory command buffer (ring buffer, configurable size, default 1000 entries)
-4. Push to SSE subscribers via the instructor event bus
+4. Push to in-memory command buffer for LLM context assembly
 
 The watcher is read-only — it never modifies `command-log.jsonl`. The shell hook and the backend are the only two processes that touch this file (write and read, respectively).
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A Go binary embedded in every workshop container image. It is the runtime engine of each workspace — serving the student web UI, proxying terminal access, managing asciinema recording, tracking student progress via event-sourced state, providing instructor monitoring APIs, and mediating LLM help interactions.
+A Go binary embedded in every workshop container image. It is the runtime engine of each workspace — serving the student web UI, proxying terminal access, managing asciinema recording, tracking student progress via event-sourced state, and mediating LLM help interactions.
 
 ## Role in the System
 
@@ -25,7 +25,7 @@ tini (PID 1)
         ├── Create /workshop/runtime/ directory
         ├── Replay /workshop/runtime/state-events.jsonl → reconstruct state
         ├── Spawn ttyd → asciinema rec → /bin/bash  (terminal + recording)
-        ├── Start HTTP server (web UI + student API + instructor API)
+        ├── Start HTTP server (web UI + student API)
         ├── Start file watcher on command-log.jsonl
         └── Supervise ttyd/asciinema (restart on exit)
 ```
@@ -84,9 +84,8 @@ The backend:
 
 The shell's `PROMPT_COMMAND` hook (from `/etc/workshop-platform.bashrc`) writes commands to `/workshop/runtime/command-log.jsonl`. The backend watches this file using fsnotify (or periodic tail-read) and:
 
-- Maintains an in-memory buffer of recent commands
-- Pushes new commands to SSE subscribers (instructor view)
-- Serves command history via the instructor API
+- Maintains an in-memory buffer of recent commands for LLM context assembly
+- Serves command history via `GET /api/commands` for display in the student UI
 
 See [Instrumentation](./instrumentation.md) for the shell hook implementation.
 
@@ -108,7 +107,7 @@ Because every step image contains ALL steps' goss specs, the backend can validat
 
 #### Optional Periodic Validation
 
-The backend can optionally run goss validation periodically (configurable interval, default off). Results from periodic validation are NOT shown to the student — they are written only to `state-events.jsonl` for instructor monitoring. This lets instructors see progress without students explicitly clicking Validate.
+The backend can optionally run goss validation periodically (configurable interval, default off). Results from periodic validation are NOT shown to the student — they are written only to `state-events.jsonl`. In K8s mode, Vector ships these to the instructor dashboard.
 
 TODO: Define the configuration mechanism for periodic validation interval. Environment variable (e.g., `WORKSHOP_GOSS_INTERVAL=30s`)? Or a field in `workshop.yaml`? Currently undocumented.
 
@@ -145,7 +144,6 @@ The backend instruments the WebSocket proxy for terminal connections:
 
 - On WebSocket connect: append `{"event": "connected"}` to `state-events.jsonl`
 - On WebSocket disconnect: append `{"event": "disconnected"}` to `state-events.jsonl`
-- Push events to SSE subscribers (instructor view)
 
 ## API Surface
 
@@ -158,40 +156,17 @@ The backend instruments the WebSocket proxy for terminal connections:
 | `POST` | `/api/steps/:id/navigate` | Navigate to a step (enforces navigation rules) |
 | `POST` | `/api/steps/:id/validate` | Run goss validation, return results |
 | `GET` | `/api/state` | Current state: active step, completed set, navigation mode |
+| `GET` | `/api/commands` | Recent command history (with pagination) |
+| `GET` | `/api/recording` | Serve `session.cast` with HTTP Range support |
 | `POST` | `/api/llm/help` | Request LLM help (streaming response) |
 | `GET` | `/api/llm/history` | Get LLM interaction history for current step |
-
-### Instructor API
-
-All instructor endpoints require bearer token authentication (token from `WORKSHOP_INSTRUCTOR_TOKEN` env var).
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/instructor/status` | Current state: active step, completed set, connected, last active |
-| `GET` | `/api/instructor/commands` | Recent command history (with pagination) |
-| `GET` | `/api/instructor/commands/stream` | SSE stream of new commands |
-| `GET` | `/api/instructor/events` | SSE stream of state events (step changes, goss results, connect/disconnect) |
-| `GET` | `/api/instructor/goss/history` | Goss validation history for all steps |
-| `GET` | `/api/instructor/recording` | Serve `session.cast` with HTTP Range support |
 
 ### Static Assets
 
 | Path | Description |
 |---|---|
 | `/` | Student web UI (embedded SPA) |
-| `/instructor/` | Instructor dashboard (embedded, separate SPA or sub-route) |
 | `/ws/terminal` | WebSocket proxy to ttyd |
-
-## Instructor Dashboard (Docker Mode)
-
-In Docker mode (single-user, no sidecar), the backend serves a simple instructor view at `/instructor/`:
-
-- Reads local JSONL files directly — no Postgres, no Vector
-- SSE endpoint tails local files and pushes events
-- Bearer token auth on all `/api/instructor/*` endpoints
-- Same container, same process — just a different web view
-
-In Kubernetes mode, the instructor view is served by a [separate dashboard service](./instructor-dashboard.md) that aggregates data from multiple workspaces via Postgres.
 
 ## How the Binary Gets into Images
 
@@ -256,7 +231,7 @@ TODO: Define whether state persistence across step transitions is required for D
 | [Flat File Artifact](../artifact/flat-file-artifact.md) | `/workshop/` directory is the read-only metadata source |
 | [Instrumentation](./instrumentation.md) | Shell bashrc writes command log; asciinema records terminal |
 | [LLM Help](./llm-help.md) | Backend handles LLM API calls and context assembly |
-| [Instructor Dashboard](./instructor-dashboard.md) | In K8s mode, aggregates data from multiple backends via Postgres |
+| [Instructor Dashboard](./instructor-dashboard.md) | K8s-only; Vector ships JSONL files from this container to the dashboard service |
 | [Aggregation](./aggregation.md) | Vector sidecar ships JSONL files to Postgres/S3 |
 | [Operator](./operator.md) | Provisions the workspace pod; backend runs inside it |
 | [CLI](./cli.md) | In local mode, manages the container lifecycle |

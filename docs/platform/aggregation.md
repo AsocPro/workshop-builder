@@ -297,7 +297,7 @@ In Docker mode (single-user, local):
 - No Postgres
 - No S3/MinIO
 - The backend reads local files directly
-- The instructor view is served by the same backend process
+- No instructor dashboard — progress is visible in the student UI; step management is via the CLI
 - Everything works without any aggregation infrastructure
 
 The container image is identical. The only difference is whether a sidecar is present.

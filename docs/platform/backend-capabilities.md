@@ -27,8 +27,8 @@ The platform supports two backends with intentionally different capability sets.
 | Terminal recording | Yes (local session.cast) | Yes (session.cast → Vector → S3) |
 | Goss validation | Yes | Yes |
 | LLM help | Yes (direct API call) | Yes (direct API call) |
-| Instructor view | Yes (local, single-user at `/instructor/`) | Yes (aggregated dashboard service) |
-| Real-time monitoring (SSE) | Yes (local file tailing) | Yes (Vector → Dashboard → SSE) |
+| Instructor view | No (student UI + CLI) | Yes (aggregated dashboard service) |
+| Real-time monitoring (SSE) | No | Yes (Vector → Dashboard → SSE) |
 | Multi-workspace aggregation | No | Yes (Postgres + Dashboard service) |
 | Asciinema playback | Yes (local file) | Yes (S3 storage) |
 
@@ -45,8 +45,8 @@ The student container is **identical** in both modes. It always writes the same 
 | Concern | Docker Mode | Kubernetes Mode |
 |---|---|---|
 | Data source | Backend reads local files | Vector sidecar ships to Postgres/S3 |
-| Instructor view | Backend serves at `/instructor/` | Separate dashboard service |
-| Real-time updates | Backend tails local files → SSE | Vector → Dashboard → SSE |
+| Instructor view | Not applicable (student UI + CLI) | Separate dashboard service |
+| Real-time updates | Not applicable | Vector → Dashboard → SSE |
 | Aggregation | Single workspace only | All workspaces in Postgres |
 | Recording storage | Local `session.cast` file | S3/MinIO object storage |
 

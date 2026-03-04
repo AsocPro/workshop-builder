@@ -2,71 +2,9 @@
 
 ## Purpose
 
-Give instructors real-time visibility into student progress. Two modes of operation:
+Give instructors real-time visibility into student progress across all active workspaces. This is a Kubernetes-mode-only component — in Docker local mode, progress is visible directly in the student UI and step management is handled by the CLI.
 
-1. **Docker mode** — single-user, local. The backend reads local JSONL files and serves a simple instructor view at `/instructor/`.
-2. **Kubernetes mode** — multi-tenant, aggregated. A separate dashboard service receives events from Vector sidecars, writes to Postgres, and serves an aggregated view for all workspaces.
-
-## Docker Mode (Local, Single-User)
-
-In Docker mode, the instructor dashboard is served directly by the [backend service](./backend-service.md) inside the workshop container. No additional infrastructure required.
-
-### Access
-
-```
-http://localhost:8080/instructor/
-```
-
-Protected by bearer token authentication:
-
-```bash
-docker run -p 8080:8080 \
-  -e WORKSHOP_INSTRUCTOR_TOKEN=my-secret-token \
-  myorg/kubernetes-101:step-1-intro
-```
-
-All `/api/instructor/*` endpoints require the `Authorization: Bearer <token>` header.
-
-### Data Source
-
-The backend reads local files directly:
-- `/workshop/runtime/command-log.jsonl` — command history
-- `/workshop/runtime/state-events.jsonl` — state transitions
-- `/workshop/runtime/session.cast` — terminal recording
-- `/workshop/runtime/llm-history.jsonl` — LLM interactions
-
-No Postgres, no Vector, no sidecar. Just file reads.
-
-### Real-Time Updates
-
-`GET /api/instructor/events` provides a Server-Sent Events (SSE) stream. The backend tails local files and pushes events:
-
-```
-event: command
-data: {"ts":"...","cmd":"kubectl get pods","exit":0}
-
-event: state
-data: {"ts":"...","event":"goss_result","step":"step-pods","passed":true,"checks":{"total":5,"passed":5}}
-
-event: connection
-data: {"ts":"...","event":"connected"}
-```
-
-### Views
-
-**Status panel**: Current step, completed steps, connection state, last activity time.
-
-**Command timeline**: Scrollable list of commands with timestamps and exit codes. Failed commands (non-zero exit) highlighted.
-
-**Asciinema player**: Embedded [asciinema-player](https://docs.asciinema.org/manual/player/) component. Clicking a command timestamp in the timeline seeks the player to that moment in the recording.
-
-**Goss history**: Timeline of validation attempts per step with pass/fail counts.
-
-## Kubernetes Mode (Multi-Tenant, Aggregated)
-
-In Kubernetes mode, a separate dashboard service aggregates data from all active workspaces.
-
-### Architecture
+## Architecture
 
 ```
 Student containers (identical to Docker mode)
@@ -89,7 +27,7 @@ Student containers (identical to Docker mode)
                                        └── Web UI server
 ```
 
-### Dashboard Service
+## Dashboard Service
 
 A separate Go binary deployed as a Kubernetes Deployment:
 
@@ -101,7 +39,7 @@ A separate Go binary deployed as a Kubernetes Deployment:
 
 The dashboard service is a thin HTTP receiver + SSE broadcaster + Postgres writer. Vector handles buffering, retry, and backpressure — no custom collection logic.
 
-### Views
+## Views
 
 **Student list**: Real-time grid showing all active workspaces with:
 - Student/workspace identifier
@@ -119,16 +57,11 @@ The dashboard service is a thin HTTP receiver + SSE broadcaster + Postgres write
 
 **Completion matrix**: For non-linear workshops (`free` or `guided` navigation), shows a matrix of students × steps with completion status. Useful for identifying which steps are causing the most difficulty.
 
-### Authentication
+## Authentication
 
-The dashboard service uses a separate auth mechanism from the student containers:
+Bearer token for simple deployments (`INSTRUCTOR_DASHBOARD_TOKEN` env var), or OIDC integration for production deployments (shared with cluster auth).
 
-- Bearer token for simple deployments (`INSTRUCTOR_DASHBOARD_TOKEN` env var)
-- OIDC integration for production deployments (shared with cluster auth)
-
-TODO: Reconcile the auth token env var naming. Docker mode uses `WORKSHOP_INSTRUCTOR_TOKEN` (set on the student container). K8s mode uses `INSTRUCTOR_DASHBOARD_TOKEN` (set on the dashboard service). These are semantically the same concept (instructor auth) but use different names. Consider standardizing.
-
-### API Surface
+## API Surface
 
 | Method | Path | Description |
 |---|---|---|
@@ -146,7 +79,7 @@ TODO: Reconcile the auth token env var naming. Docker mode uses `WORKSHOP_INSTRU
 
 | Component | Relationship |
 |---|---|
-| [Backend Service](./backend-service.md) | Serves Docker-mode instructor view; K8s mode is separate |
-| [Aggregation](./aggregation.md) | Vector ships data to the dashboard service in K8s mode |
+| [Backend Service](./backend-service.md) | Student containers write JSONL files; Vector ships them here |
+| [Aggregation](./aggregation.md) | Vector ships data to the dashboard service |
 | [Instrumentation](./instrumentation.md) | Source of command logs and recordings |
 | [Operator](./operator.md) | Dashboard watches WorkspaceInstance CRDs for workspace discovery |
