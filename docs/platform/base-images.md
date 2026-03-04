@@ -51,7 +51,7 @@ workshop-base:ubuntu
   └── ENTRYPOINT configuration
          │
          ▼ Author layers (via workshop.yaml build)
-myorg/kubernetes-101:step-1-intro
+myorg/kubernetes-101:step-0               (base starting point — no completed step)
   ├── apt-get install kubectl helm ...     (author's packages)
   ├── /workshop/workshop.json              (workshop identity + step list)
   ├── /workshop/steps/step-pods/           (ALL steps' metadata)
@@ -61,6 +61,10 @@ myorg/kubernetes-101:step-1-intro
   │   └── llm.json
   ├── /workshop/steps/step-services/
   │   └── ...
+  └── /workspace/...                       (initial workspace state)
+         │
+         ▼
+myorg/kubernetes-101:step-1-intro         (completed state after step 1)
   └── /workspace/...                       (step-specific content files)
 ```
 
@@ -71,10 +75,11 @@ Multiple workshops built on the same base image share base layers in the registr
 ```
 workshop-base:ubuntu (shared layers — pulled once)
   │
+  ├── myorg/kubernetes-101:step-0        (unique content layers only)
   ├── myorg/kubernetes-101:step-1-intro  (unique content layers only)
   ├── myorg/kubernetes-101:step-2-deploy (unique content layers only)
-  ├── myorg/docker-basics:step-1         (unique content layers only)
-  └── myorg/linux-admin:step-1           (unique content layers only)
+  ├── myorg/docker-basics:step-0         (unique content layers only)
+  └── myorg/linux-admin:step-0           (unique content layers only)
 ```
 
 Students pulling multiple workshops on the same base download the base layers once. This significantly reduces bandwidth and storage for workshop events with multiple workshops.
@@ -143,37 +148,38 @@ The `workshop build compile` command validates that the required components exis
 
 ## Building Base Images
 
-Base images are built from Containerfiles maintained by the platform team:
+Base images are built by the platform team using a Dagger pipeline. The pipeline fetches the upstream distro image, installs minimal shell prerequisites, copies in the static platform binaries, configures shell instrumentation, and pushes the result to the registry:
 
-```dockerfile
-# workshop-base:ubuntu
-FROM ubuntu:22.04
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Platform tooling
-COPY tini /sbin/tini
-COPY workshop-backend /usr/local/bin/workshop-backend
-COPY goss /usr/local/bin/goss
-COPY asciinema /usr/bin/asciinema
-COPY workshop-platform.bashrc /etc/workshop-platform.bashrc
-
-RUN chmod +x /sbin/tini /usr/local/bin/workshop-backend /usr/local/bin/goss /usr/bin/asciinema
-
-# Source shell instrumentation for interactive bash sessions
-RUN echo '[ -f /etc/workshop-platform.bashrc ] && . /etc/workshop-platform.bashrc' >> /etc/bash.bashrc
-
-# Runtime directory created by backend on startup
-RUN mkdir -p /workshop/runtime
-
-WORKDIR /workspace
-
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
 ```
+upstream distro image (ubuntu:22.04 / alpine:3 / centos-stream:9)
+      │
+      ▼
+Install shell prerequisites (bash, curl, ca-certificates)
+      │
+      ▼
+Copy platform binaries from release artifacts:
+  → tini            → /sbin/tini
+  → workshop-backend → /usr/local/bin/workshop-backend
+  → goss            → /usr/local/bin/goss
+  → asciinema       → /usr/bin/asciinema
+  → workshop-platform.bashrc → /etc/workshop-platform.bashrc
+      │
+      ▼
+chmod +x all binaries
+      │
+      ▼
+Append shell instrumentation source to /etc/bash.bashrc
+      │
+      ▼
+mkdir -p /workshop/runtime
+WORKDIR /workspace
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+      │
+      ▼
+Push as workshop-base:{alpine,ubuntu,centos}
+```
+
+The three base image variants (alpine, ubuntu, centos) are built in parallel by the same pipeline run.
 
 ## Relationship to Other Components
 
