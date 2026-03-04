@@ -1,22 +1,23 @@
-# Workshop Definition — `workshop.yaml`
+# Workshop Definition — Split File Structure
 
 ## Purpose
 
-The sole author-facing configuration file. Defines the container image build recipe for every workshop step, tutorial content, validation specs, navigation structure, and LLM help configuration. This is what authors write, commit to Git, and hand to the build pipeline.
+The author-facing configuration for a workshop. A thin **manifest** (`workshop.yaml`) defines workshop identity, navigation mode, and step ordering. Each step is a self-contained directory with its own `step.yaml`, convention-named content files, and a `files/` subdirectory for content to copy into the image.
 
-`workshop.yaml` describes **what each step looks like when completed** (files, environment, commands), **what students read** (markdown tutorial content), **how students navigate** (linear, free, or guided), and **per-step LLM help behavior** (context, reference docs). Deployment behavior — lifecycle, isolation, cluster mode, resources, access, LLM provider configuration — is operator configuration and lives in the [WorkspaceTemplate CRD](../platform/crds.md), not here.
+Authors write these files, commit them to Git, and hand them to the build pipeline.
 
 ## What It Contains
 
-- Workshop identity and base image reference
+- Workshop identity and base image reference (`workshop.yaml`)
 - Navigation mode (`linear`, `free`, or `guided`)
-- Per-step file contents (inline or sourced from local paths)
-- Per-step environment variables
-- Per-step shell commands (run during the image build)
-- Per-step tutorial markdown (inline or sourced from local files)
-- Per-step goss validation specs (inline or sourced from local files)
-- Per-step LLM help configuration (mode, context, reference docs)
-- Step identifiers, titles, ordering, groups, and prerequisites
+- Ordered step list (`workshop.yaml`)
+- Workshop-level LLM system prompt overrides (`prompts/`)
+- Per-step build recipe — files, env, commands (`steps/<id>/step.yaml`)
+- Per-step tutorial markdown (`steps/<id>/content.md`)
+- Per-step goss validation specs (`steps/<id>/goss.yaml`)
+- Per-step static help content — hints, explanations, solutions (`steps/<id>/hints.md`, `explain.md`, `solve.md`)
+- Per-step LLM help configuration (`steps/<id>/step.yaml` + `steps/<id>/llm-docs/`)
+- Step identifiers, titles, groups, and prerequisites
 
 ## What It Does NOT Contain
 
@@ -30,15 +31,76 @@ The sole author-facing configuration file. Defines the container image build rec
 
 These are operator concerns configured in the [WorkspaceTemplate CRD](../platform/crds.md).
 
+## Directory Structure
+
+A workshop project has this layout:
+
+```
+my-workshop/
+  workshop.yaml                    # manifest — identity, navigation, step order
+  prompts/                         # LLM system prompt overrides (optional, workshop-level)
+    hints.md                       # overrides default hints mode system prompt
+    explain.md                     # overrides default explain mode system prompt
+    solve.md                       # overrides default solve mode system prompt
+  steps/
+    step-1-intro/
+      step.yaml                    # build recipe — files, env, commands, LLM context
+      content.md                   # tutorial markdown (required)
+      goss.yaml                    # validation spec (optional — presence enables validation)
+      hints.md                     # static hints (optional — works without LLM)
+      explain.md                   # static explanation (optional — works without LLM)
+      solve.md                     # static solution (optional — works without LLM)
+      files/                       # content files to copy into the image
+        README.md
+    step-2-deploy/
+      step.yaml
+      content.md
+      goss.yaml
+      files/
+        server.go
+        deployment.yaml
+      llm-docs/                    # LLM reference docs (optional — presence enables docs)
+        kubectl-cheatsheet.md
+    step-3-observe/
+      step.yaml
+      content.md
+      files/
+        dashboard.yaml
+```
+
+### Convention Filenames
+
+Files in each step directory are discovered by convention — no path configuration needed:
+
+| File/Directory | Required | Purpose | How Detected |
+|---|---|---|---|
+| `step.yaml` | Yes | Build recipe and step metadata | Must exist |
+| `content.md` | Yes | Tutorial markdown rendered in the UI | Must exist |
+| `goss.yaml` | No | Goss validation spec | Presence enables validation for this step |
+| `hints.md` | No | Static hints content (works without LLM) | Presence enables hints help |
+| `explain.md` | No | Static explanation content (works without LLM) | Presence enables explain help |
+| `solve.md` | No | Static solution content (works without LLM) | Presence enables solve help |
+| `files/` | No | Content files referenced by `step.yaml` file mappings | Presence means files to copy |
+| `llm-docs/` | No | Reference docs included in LLM context | Presence enables doc-augmented LLM help |
+
+No inline alternatives exist. Tutorial content is always in `content.md`, validation specs are always in `goss.yaml`. This eliminates mutual exclusion rules and keeps every step directory self-documenting — `ls` tells you exactly what a step has.
+
 ## Design Rationale
 
 By encoding each step as an OCI image build recipe:
 
 - Step state is reproducible from source — no live cluster snapshots required
 - Step transitions become a single image swap, not a multi-step namespace teardown
-- Version control is natural — commit `workshop.yaml` and local source files
+- Version control is natural — commit the workshop directory and all source files
 - Incremental builds are handled by Dagger layer caching — unchanged steps are skipped automatically
 - Local and cluster mode use the same images with no translation gap
+
+Splitting the definition into per-step directories:
+
+- Each step is self-contained — co-located with its files and content
+- Git diffs are scoped to the step that changed
+- Adding/removing/reordering steps means editing the manifest, not shuffling content
+- The UI authoring tool generates this structure naturally
 
 ## The Workshop Is a Container Image
 
@@ -48,7 +110,7 @@ There is no separate distribution artifact. All metadata — step definitions, m
 docker run -p 8080:8080 myorg/kubernetes-101:step-1-intro
 ```
 
-No CLI required, no SQLite, no external configuration. The [compilation pipeline](../artifact/compilation.md) transforms `workshop.yaml` into images built on top of [base images](../platform/base-images.md) that include all platform tooling.
+No CLI required, no SQLite, no external configuration. The [compilation pipeline](../artifact/compilation.md) transforms the workshop directory into images built on top of [base images](../platform/base-images.md) that include all platform tooling.
 
 Every step image contains ALL steps' metadata (tutorial content, goss specs, LLM config). Only the `/workspace/` content differs per step. This enables:
 - Validating any step at any time (non-linear navigation)
@@ -79,50 +141,27 @@ This means:
 
 In practice, most students will never need a reset. The normal workflow is: read the tutorial, make changes in the workspace, validate with goss, move on to the next step's instructions — all within the same container.
 
-## Schema
+## Schema: workshop.yaml
+
+The top-level manifest. Defines workshop identity, navigation mode, and the ordered step list.
 
 ```yaml
 version: v1
 
 workshop:
-  name: <workshop-name>          # workshop identifier
-  image: <org/repo>              # base image name; step ID appended as tag
-  navigation: <linear|free|guided>  # navigation mode (default: linear)
+  name: <workshop-name>              # workshop identifier
+  image: <org/repo>                  # base image name; step ID appended as tag
+  navigation: <linear|free|guided>   # navigation mode (default: linear)
 
 base:
-  image: <registry/image:tag>    # starting layer for step 1
+  image: <registry/image:tag>        # starting layer for step 1
   # OR
-  containerFile: <path to container file>
+  containerFile: <path>              # path to a Containerfile/Dockerfile (relative to workshop.yaml)
 
 steps:
-  - id: <step-id>                # URL-safe identifier; used as image tag suffix
-    title: "<display title>"
-    group: <group-name>          # step group for guided navigation (optional)
-    requires:                    # prerequisite step IDs (optional)
-      - <step-id>
-    markdown: |                  # inline tutorial content (optional)
-      <markdown content>
-    # OR:
-    markdownFile: <relative local path>   # path to .md file, relative to workshop.yaml (optional)
-    files:
-      - path: <absolute container path>
-        content: |               # inline content
-          <file content>
-      - path: <absolute container path>
-        source: <relative local path>   # relative to workshop.yaml
-    env:
-      KEY: value
-    commands:
-      - <shell command>
-    goss: |                      # inline goss YAML spec for step validation (optional)
-      <goss spec content>
-    # OR:
-    gossFile: <relative local path>   # path to goss.yaml file, relative to workshop.yaml (optional)
-    llm:                         # per-step LLM help config (optional)
-      context: |                   # instructor-provided context for the LLM
-        <hints about common mistakes, gotchas, etc.>
-      docs:                        # reference docs to include in LLM context
-        - <relative local path>    # baked into image at /workshop/steps/<id>/llm-docs/
+  - <step-id>                        # references steps/<step-id>/ directory
+  - <step-id>
+  - <step-id>
 ```
 
 ### Top-Level Fields
@@ -135,9 +174,13 @@ steps:
 | `workshop.navigation` | string | No | Navigation mode: `linear` (default), `free`, or `guided` |
 | `base.image` | string | No | Starting image for step 1 build (e.g. `workshop-base:ubuntu`) |
 | `base.containerFile` | string | No | Path to a Containerfile/Dockerfile for building the base layer (relative to `workshop.yaml`) |
-| `steps` | list | Yes | Ordered list of step build specs |
+| `steps` | list | Yes | Ordered list of step IDs; each must match a directory under `steps/` |
 
 `base.image` and `base.containerFile` are mutually exclusive — specify one or the other, not both. Exactly one must be present.
+
+The `steps` list defines ordering explicitly. Steps are not auto-discovered from directories — if a directory exists under `steps/` but is not listed in the manifest, it is ignored (useful for drafts or work-in-progress steps). If a step ID is listed but has no corresponding directory, validation fails.
+
+Step IDs (and therefore directory names) are freeform — they only need to be lowercase alphanumeric and hyphens. The `step-1-intro`, `step-2-deploy` naming used in examples is just a convention. Names like `pods`, `deploy-app`, or `rbac` work equally well. Step ordering is always determined by position in the `steps` list, not by directory name.
 
 When using a [base image](../platform/base-images.md) (e.g. `workshop-base:ubuntu`), all platform tooling (tini, backend binary, goss, asciinema, shell instrumentation) is pre-installed. When using a custom `base.image` or `base.containerFile`, the author is responsible for installing the required platform components — see [Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements).
 
@@ -157,42 +200,111 @@ In `guided` mode, a step is accessible if:
 
 If neither `requires` nor `group` is set on a step, it is always accessible in `guided` mode.
 
+## Schema: step.yaml
+
+Per-step build recipe at `steps/<id>/step.yaml`. Defines metadata, file mappings, environment variables, commands, and LLM configuration.
+
+```yaml
+title: "<display title>"
+group: <group-name>                  # for guided navigation (optional)
+requires:                            # prerequisite step IDs (optional)
+  - <step-id>
+files:
+  - source: <filename>              # filename in this step's files/ directory
+    target: <absolute container path>
+    mode: "<file mode>"              # optional, e.g. "0644"
+  - source: <filename>
+    target: <absolute container path>
+env:
+  KEY: value
+commands:
+  - <shell command>
+llm:                                 # per-step LLM help config (optional)
+  context: |                         # instructor-provided context for the LLM
+    <hints about common mistakes, gotchas, etc.>
+```
+
 ### Step Fields
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `id` | string | Yes | URL-safe step identifier; used as the image tag (e.g. `step-1-intro`) |
 | `title` | string | Yes | Human-readable step title for UI display |
 | `group` | string | No | Group name for `guided` navigation mode |
 | `requires` | list | No | Step IDs that must be completed before this step is accessible |
-| `markdown` | string | No | Inline Markdown tutorial content for this step |
-| `markdownFile` | string | No | Relative path to a `.md` file (relative to `workshop.yaml`) |
-| `files` | list | No | Files to write into the image layer |
+| `files` | list | No | Files to copy from `files/` into the image |
 | `env` | map | No | Environment variables set in the image layer |
 | `commands` | list | No | Shell commands run during the image build |
-| `goss` | string | No | Inline [goss](https://github.com/goss-org/goss) YAML spec for validating step completion |
-| `gossFile` | string | No | Relative path to a goss YAML file (relative to `workshop.yaml`) |
 | `llm` | object | No | Per-step LLM help configuration |
 
-`markdown` and `markdownFile` are mutually exclusive — specify one or the other, not both. At compile time, the content is written to `/workshop/steps/<id>/content.md` in the image.
+The step `id` is derived from the directory name — it is not repeated in `step.yaml`.
 
-`goss` and `gossFile` are mutually exclusive — specify one or the other, not both. At compile time, the resolved spec is written to `/workshop/steps/<id>/goss.yaml` in the image.
+### File Entry Fields
 
-### LLM Help Configuration
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | Yes | Filename within this step's `files/` directory |
+| `target` | string | Yes | Absolute path inside the container image |
+| `mode` | string | No | File permission mode (e.g. `"0755"`) |
 
-LLM provider configuration (provider, model, API key, max tokens, default mode) is an operator concern configured in the [WorkspaceTemplate CRD](../platform/crds.md). Authors configure only the per-step help behavior in `workshop.yaml`.
+All source files live in the step's `files/` subdirectory. The `source` field is a filename (not a path) — the build pipeline resolves it relative to `steps/<id>/files/`.
+
+### Help Content — Static and LLM
+
+The help system has two layers: **static help content** that works without any LLM infrastructure, and **LLM-generated help** that requires an operator-configured API key. Both are authored per-step using convention files.
+
+#### Static Help Content (No LLM Required)
+
+Per-step markdown files provide help content that is rendered directly in the UI — no API call needed:
+
+| File | Help Mode | Purpose |
+|---|---|---|
+| `hints.md` | Hints | Nudges and leading questions — never gives the answer directly |
+| `explain.md` | Explain | Explains concepts and shows related examples, but not the exact solution |
+| `solve.md` | Solve | Provides direct solutions with explanation |
+
+These files are optional. The help button for each mode is only shown if the corresponding file exists (or LLM is configured). This means every workshop can offer a help system — even in environments with no LLM API key.
+
+#### LLM Help Configuration
+
+LLM provider configuration (provider, model, API key, max tokens, default mode) is an operator concern configured in the [WorkspaceTemplate CRD](../platform/crds.md). Authors configure only the per-step help behavior in `step.yaml`.
 
 Per-step `llm` fields:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `context` | string | No | Instructor-provided context (common mistakes, hints) included in LLM prompts |
-| `docs` | list | No | Relative paths to reference doc files; baked into image at `/workshop/steps/<id>/llm-docs/` |
 
-LLM help modes:
-- `hints` — nudges and leading questions, never gives the answer directly
-- `explain` — explains concepts and shows related examples, but not the exact solution
-- `solve` — provides direct solutions (use sparingly, for steps where the learning is in understanding, not discovering)
+Reference docs are placed in the step's `llm-docs/` directory — no configuration needed. If `llm-docs/` exists and contains files, they are baked into the image at `/workshop/steps/<id>/llm-docs/` and included in LLM context assembly.
+
+#### Workshop-Level LLM Prompt Overrides
+
+The `prompts/` directory at the workshop root allows authors to override the default system prompts for each help mode:
+
+```
+my-workshop/
+  prompts/
+    hints.md          # overrides the default hints system prompt
+    explain.md        # overrides the default explain system prompt
+    solve.md          # overrides the default solve system prompt
+```
+
+These shape how the LLM behaves — not what it says for a specific step, but the pedagogical rules it follows. The backend ships sensible defaults; most authors will never need to override them. Power users (e.g., a security workshop that wants a more Socratic hints mode) can customize freely.
+
+#### Help Behavior Matrix
+
+The backend resolves help requests based on what's available:
+
+| Static File | LLM Configured | Behavior |
+|---|---|---|
+| No | No | Help button disabled for this mode |
+| Yes | No | Static content rendered directly — no API call |
+| No | Yes | LLM generates help using step context |
+| Yes | Yes | Static content included as reference in LLM context; LLM builds on the author's content |
+
+This fallback model means:
+- Authors who provide static help files get a working help system everywhere
+- LLM adds value on top when available, but is never required
+- Authors can provide static content as a baseline and let the LLM personalize it based on the student's actual state
 
 See [LLM Help](../platform/llm-help.md) for full details on context assembly and the help API.
 
@@ -205,23 +317,13 @@ See [LLM Help](../platform/llm-help.md) for full details on context assembly and
 3. Returns per-test pass/fail results to the frontend
 4. Writes a goss result event to `/workshop/runtime/state-events.jsonl`
 
-Students can see exactly which checks are failing so they know what to fix. Steps without a goss spec have no validation — the student can mark them complete freely.
+Students can see exactly which checks are failing so they know what to fix. Steps without a `goss.yaml` have no validation — the student can mark them complete freely.
 
 Because every step image contains ALL steps' goss specs (under `/workshop/steps/`), the backend can validate any step at any time — enabling non-linear navigation where students complete steps in any order.
 
 #### Goss binary installation
 
-The goss binary is pre-installed in all [base images](../platform/base-images.md) at `/usr/local/bin/goss`. When using a custom base image, the Dagger pipeline installs goss automatically if any step declares a `goss` or `gossFile` field.
-
-### File Entry Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `path` | string | Absolute path inside the container image |
-| `content` | string | Inline file content (YAML literal block scalar) |
-| `source` | string | Relative path to a local file (relative to `workshop.yaml`) |
-
-Exactly one of `content` or `source` must be present on each file entry.
+The goss binary is pre-installed in all [base images](../platform/base-images.md) at `/usr/local/bin/goss`. When using a custom base image, the Dagger pipeline installs goss automatically if any step has a `goss.yaml` file.
 
 ## Image Tagging Convention
 
@@ -237,29 +339,29 @@ Note: Digest-pinned tags and workshop versioning strategies are deferred to a fu
 
 ## Dagger Build Pipeline
 
-The Dagger pipeline processes steps in order, with each step building on the previous:
+The Dagger pipeline reads the manifest and per-step directories, processing steps in order:
 
 ```
 workshop-base:<distro> (or base.image / base.containerFile)
     │
     ▼
 Step 1: FROM base
-        → write files
+        → copy files from steps/<id>/files/ to targets
         → set env vars
         → run commands
-        → bake /workshop/ metadata (ALL steps' content, goss, LLM config)
+        → bake /workshop/ metadata (ALL steps' content, help, goss, LLM config, prompts)
         → push as <workshop.image>:step-1-id
     │
     ▼
 Step 2: FROM <workshop.image>:step-1-id
-        → write files
+        → copy files from steps/<id>/files/ to targets
         → set env vars
         → run commands
         → push as <workshop.image>:step-2-id
     │
     ▼
 Step N: FROM <workshop.image>:step-(N-1)-id
-        → write files
+        → copy files from steps/<id>/files/ to targets
         → set env vars
         → run commands
         → push as <workshop.image>:step-N-id
@@ -277,17 +379,19 @@ Dagger's layer cache handles unchanged steps automatically — only steps with c
 
 | Consumer | Source | How It Uses It |
 |---|---|---|
-| CLI build proxy | Writes to `workshop.yaml` | Records file diffs, env changes, and commands from interactive authoring sessions |
-| Dagger build pipeline | Reads `workshop.yaml` + local source files | Builds and pushes one OCI image per step; bakes metadata as flat files |
-| [Shared Go Library](../platform/shared-go-library.md) | Reads `workshop.yaml` | Parses and validates the spec; provides types consumed by CLI and compilation |
+| CLI build proxy | Writes to step directories | Records file diffs, env changes, and commands from interactive authoring sessions |
+| Dagger build pipeline | Reads `workshop.yaml` + step directories | Builds and pushes one OCI image per step; bakes metadata as flat files |
+| [Shared Go Library](../platform/shared-go-library.md) | Reads `workshop.yaml` + step directories | Parses and validates the spec; provides types consumed by CLI and compilation |
 | [CLI](../platform/cli.md) | Image tags | In local mode, pulls step images and runs containers |
 | [Operator](../platform/operator.md) | Image tags | Reads image tags per step; updates Deployment spec during step transitions |
 
-`workshop.yaml` is consumed at build time only. All runtime consumers read from the flat files baked into the image under `/workshop/`.
+The workshop definition is consumed at build time only. All runtime consumers read from the flat files baked into the image under `/workshop/`.
 
 ## Validation Rules
 
-The [Shared Go Library](../platform/shared-go-library.md) validates `workshop.yaml` before any build occurs.
+The [Shared Go Library](../platform/shared-go-library.md) validates the workshop structure before any build occurs.
+
+### Manifest Validation (`workshop.yaml`)
 
 | Rule | Error Message |
 |---|---|
@@ -299,22 +403,23 @@ The [Shared Go Library](../platform/shared-go-library.md) validates `workshop.ya
 | Both `base.image` and `base.containerFile` are set | `base: image and containerFile are mutually exclusive` |
 | `base.containerFile` path does not exist | `base.containerFile: file not found: <path>` |
 | `steps` list is empty | `steps: at least one step is required` |
-| A step `id` is missing | `steps[<n>]: id is required` |
-| A step `id` contains invalid characters (not URL-safe) | `steps[<n>].id: must be lowercase alphanumeric and hyphens only` |
-| A step `id` is duplicated | `steps[<n>].id: "<id>" is already used by step <m>` |
-| A step `title` is missing | `steps[<n>]: title is required` |
-| A step `requires` references a non-existent step ID | `steps[<n>].requires: unknown step "<id>"` |
-| A step `requires` creates a cycle | `steps[<n>].requires: circular dependency detected` |
-| `workshop.navigation` is `linear` but steps have `group` or `requires` | `steps[<n>].group: not allowed in linear navigation mode` |
-| A step `llm.docs` path does not exist | `steps[<n>].llm.docs[<m>]: file not found: <path>` |
-| A file entry has neither `content` nor `source` | `steps[<n>].files[<m>]: exactly one of content or source is required` |
-| A file entry has both `content` and `source` | `steps[<n>].files[<m>]: content and source are mutually exclusive` |
-| A file entry `source` path does not exist | `steps[<n>].files[<m>].source: file not found: <path>` |
-| A file entry `path` is not absolute | `steps[<n>].files[<m>].path: must be an absolute path` |
-| Both `markdown` and `markdownFile` are set | `steps[<n>]: markdown and markdownFile are mutually exclusive` |
-| `markdownFile` path does not exist | `steps[<n>].markdownFile: file not found: <path>` |
-| Both `goss` and `gossFile` are set | `steps[<n>]: goss and gossFile are mutually exclusive` |
-| `gossFile` path does not exist | `steps[<n>].gossFile: file not found: <path>` |
+| A step ID is listed but has no `steps/<id>/` directory | `steps[<n>]: directory not found: steps/<id>/` |
+| A step ID contains invalid characters (not URL-safe) | `steps[<n>]: must be lowercase alphanumeric and hyphens only` |
+| A step ID is duplicated | `steps[<n>]: "<id>" is already used at position <m>` |
+
+### Step Validation (`steps/<id>/`)
+
+| Rule | Error Message |
+|---|---|
+| `step.yaml` is missing | `steps/<id>/: step.yaml not found` |
+| `content.md` is missing | `steps/<id>/: content.md not found` |
+| `title` is missing in `step.yaml` | `steps/<id>/step.yaml: title is required` |
+| A `requires` entry references a non-existent step ID | `steps/<id>/step.yaml: requires: unknown step "<ref>"` |
+| A `requires` entry creates a cycle | `steps/<id>/step.yaml: requires: circular dependency detected` |
+| `workshop.navigation` is `linear` but step has `group` or `requires` | `steps/<id>/step.yaml: group not allowed in linear navigation mode` |
+| A `files[].source` does not exist in `files/` | `steps/<id>/step.yaml: files: source not found: files/<filename>` |
+| A `files[].target` is not an absolute path | `steps/<id>/step.yaml: files: target must be an absolute path` |
+| `llm-docs/` exists but is empty | `steps/<id>/llm-docs/: directory is empty` |
 
 ### File Deletion
 
@@ -325,14 +430,26 @@ commands:
   - rm /workspace/file-to-remove.txt
 ```
 
-Do not use an empty `files:` entry with blank content — that creates an empty file, it does not delete the file from the layer.
+Do not use an empty file entry — that creates an empty file, it does not delete the file from the layer.
 
 ## Examples
 
 ### Single-Step Workshop
 
-Minimal case — one step, one file, linear navigation (default).
+Minimal case — one step, linear navigation (default).
 
+```
+my-workshop/
+  workshop.yaml
+  steps/
+    step-1-intro/
+      step.yaml
+      content.md
+      files/
+        README.md
+```
+
+**`workshop.yaml`**:
 ```yaml
 version: v1
 
@@ -344,18 +461,42 @@ base:
   image: workshop-base:ubuntu
 
 steps:
-  - id: step-1-intro
-    title: "Introduction"
-    markdown: |
-      Welcome to the workshop! In this step you'll get oriented with the environment.
-    files:
-      - path: /workspace/README.md
-        content: |
-          Welcome to the workshop!
+  - step-1-intro
 ```
 
-### Multi-Step Workshop with Local Files
+**`steps/step-1-intro/step.yaml`**:
+```yaml
+title: "Introduction"
+files:
+  - source: README.md
+    target: /workspace/README.md
+```
 
+**`steps/step-1-intro/content.md`**:
+```markdown
+Welcome to the workshop! In this step you'll get oriented with the environment.
+```
+
+### Multi-Step Workshop
+
+```
+my-workshop/
+  workshop.yaml
+  steps/
+    step-1-intro/
+      step.yaml
+      content.md
+      files/
+        README.md
+        main.go
+    step-2-deploy/
+      step.yaml
+      content.md
+      files/
+        server.go
+```
+
+**`workshop.yaml`**:
 ```yaml
 version: v1
 
@@ -367,33 +508,57 @@ base:
   image: workshop-base:ubuntu
 
 steps:
-  - id: step-1-intro
-    title: "Introduction"
-    markdownFile: ./docs/step-1.md
-    files:
-      - path: /workspace/README.md
-        content: "Welcome."
-      - path: /workspace/app/main.go
-        source: ./step-1/main.go
-    env:
-      APP_MODE: development
-    commands:
-      - go mod download
+  - step-1-intro
+  - step-2-deploy
+```
 
-  - id: step-2-deploy
-    title: "Deploy the App"
-    markdownFile: ./docs/step-2.md
-    files:
-      - path: /workspace/app/server.go
-        source: ./step-2/server.go
-    commands:
-      - go build -o /workspace/bin/app ./app
+**`steps/step-1-intro/step.yaml`**:
+```yaml
+title: "Introduction"
+files:
+  - source: README.md
+    target: /workspace/README.md
+  - source: main.go
+    target: /workspace/app/main.go
+env:
+  APP_MODE: development
+commands:
+  - go mod download
+```
+
+**`steps/step-2-deploy/step.yaml`**:
+```yaml
+title: "Deploy the App"
+files:
+  - source: server.go
+    target: /workspace/app/server.go
+commands:
+  - go build -o /workspace/bin/app ./app
 ```
 
 ### Free Navigation Workshop
 
 Students can complete steps in any order. Progress is tracked as a completion set.
 
+```
+my-workshop/
+  workshop.yaml
+  steps/
+    step-pods/
+      step.yaml
+      content.md
+      goss.yaml
+    step-services/
+      step.yaml
+      content.md
+      goss.yaml
+    step-configmaps/
+      step.yaml
+      content.md
+      goss.yaml
+```
+
+**`workshop.yaml`**:
 ```yaml
 version: v1
 
@@ -406,26 +571,21 @@ base:
   image: workshop-base:ubuntu
 
 steps:
-  - id: step-pods
-    title: "Working with Pods"
-    markdownFile: ./docs/pods.md
-    gossFile: ./goss/pods.yaml
+  - step-pods
+  - step-services
+  - step-configmaps
+```
 
-  - id: step-services
-    title: "Services & Networking"
-    markdownFile: ./docs/services.md
-    gossFile: ./goss/services.yaml
-
-  - id: step-configmaps
-    title: "ConfigMaps & Secrets"
-    markdownFile: ./docs/configmaps.md
-    gossFile: ./goss/configmaps.yaml
+**`steps/step-pods/step.yaml`**:
+```yaml
+title: "Working with Pods"
 ```
 
 ### Guided Navigation with Groups and Prerequisites
 
 Groups unlock in order. Steps within a group can be completed in any order. The `requires` field adds cross-group dependencies.
 
+**`workshop.yaml`**:
 ```yaml
 version: v1
 
@@ -438,103 +598,124 @@ base:
   image: workshop-base:ubuntu
 
 steps:
-  - id: step-pods
-    title: "Working with Pods"
-    group: basics
-    markdownFile: ./docs/pods.md
-    gossFile: ./goss/pods.yaml
+  - step-pods
+  - step-services
+  - step-configmaps
+  - step-rbac
+```
 
-  - id: step-services
-    title: "Services & Networking"
-    group: basics
-    markdownFile: ./docs/services.md
-    gossFile: ./goss/services.yaml
+**`steps/step-pods/step.yaml`**:
+```yaml
+title: "Working with Pods"
+group: basics
+```
 
-  - id: step-configmaps
-    title: "ConfigMaps & Secrets"
-    group: configuration
-    markdownFile: ./docs/configmaps.md
-    gossFile: ./goss/configmaps.yaml
+**`steps/step-rbac/step.yaml`**:
+```yaml
+title: "RBAC"
+group: security
+requires:
+  - step-pods
+```
 
-  - id: step-rbac
-    title: "RBAC"
-    group: security
-    requires:
-      - step-pods
-    markdownFile: ./docs/rbac.md
-    gossFile: ./goss/rbac.yaml
+### Workshop with Static Help (No LLM)
+
+Help content that works in any environment — no API key needed.
+
+```
+steps/
+  step-pods/
+    step.yaml
+    content.md
+    goss.yaml
+    hints.md
+    explain.md
+    solve.md
+```
+
+**`steps/step-pods/hints.md`**:
+```markdown
+- Have you checked which namespace you're targeting?
+- What flag does `kubectl` use to specify a namespace?
+- Try running `kubectl get pods` with the `-n` flag.
+```
+
+**`steps/step-pods/solve.md`**:
+```markdown
+Run the following command to create the pod in the correct namespace:
+
+    kubectl apply -f deployment.yaml -n workshop
 ```
 
 ### Workshop with LLM Help
 
 Per-step LLM help configuration. The LLM provider, model, and API key are configured by the operator in the [WorkspaceTemplate CRD](../platform/crds.md).
 
+```
+steps/
+  step-pods/
+    step.yaml
+    content.md
+    goss.yaml
+    hints.md                       # static baseline — LLM builds on this
+    llm-docs/
+      kubectl-cheatsheet.md
+```
+
+**`steps/step-pods/step.yaml`**:
 ```yaml
-version: v1
+title: "Working with Pods"
+llm:
+  context: |
+    Common mistake: students forget the -n namespace flag.
+    The correct namespace for this exercise is "workshop".
+```
 
-workshop:
-  name: kubernetes-101
-  image: myorg/kubernetes-101
+Reference docs in `llm-docs/` are automatically included in LLM context — no configuration needed beyond placing the files in the directory. Static help files (`hints.md`, etc.) are included as reference material when LLM is active, giving the LLM author-curated content to build on.
 
-base:
-  image: workshop-base:ubuntu
+### Workshop with Custom LLM Prompts
 
-steps:
-  - id: step-pods
-    title: "Working with Pods"
-    markdownFile: ./docs/pods.md
-    gossFile: ./goss/pods.yaml
-    llm:
-      context: |
-        Common mistake: students forget the -n namespace flag.
-        The correct namespace for this exercise is "workshop".
-      docs:
-        - ./docs/kubectl-cheatsheet.md
+Override the default LLM system prompts at the workshop level for a different pedagogical style.
 
-  - id: step-services
-    title: "Services & Networking"
-    markdownFile: ./docs/services.md
-    gossFile: ./goss/services.yaml
-    llm:
-      context: |
-        Students often confuse ClusterIP and NodePort service types.
-      docs:
-        - ./docs/kubectl-cheatsheet.md
-        - ./docs/networking-guide.md
+```
+my-workshop/
+  workshop.yaml
+  prompts/
+    hints.md
+  steps/
+    ...
+```
+
+**`prompts/hints.md`**:
+```markdown
+You are a security-focused teaching assistant. Use the Socratic method exclusively.
+Never confirm whether the student's approach is correct — instead, ask questions
+that lead them to verify their own work. Emphasize threat modeling and defense
+in depth. When the student is stuck, ask them what an attacker would do.
 ```
 
 ### Workshop with Goss Validation
 
-The goss binary is pre-installed in base images — authors only need to provide the spec.
+The goss binary is pre-installed in base images — authors only need to provide the spec file.
 
+**`steps/step-1-scaffold/goss.yaml`**:
 ```yaml
-steps:
-  - id: step-1-scaffold
-    title: "Project Scaffold"
-    markdownFile: ./docs/step-1-scaffold.md
-    files:
-      - path: /workspace/go.mod
-        source: ./scaffold/go.mod
-      - path: /workspace/main.go
-        source: ./scaffold/main.go
-    commands:
-      - cd /workspace && go mod download
-    goss: |
-      file:
-        /workspace/go.mod:
-          exists: true
-        /workspace/main.go:
-          exists: true
-      command:
-        "cd /workspace && go build ./...":
-          exit-status: 0
-          title: "Project compiles successfully"
+file:
+  /workspace/go.mod:
+    exists: true
+  /workspace/main.go:
+    exists: true
+command:
+  "cd /workspace && go build ./...":
+    exit-status: 0
+    title: "Project compiles successfully"
 ```
 
 ### Workshop with Custom Base Container
 
 Use a Containerfile to customize the base layer instead of starting from a platform base image.
 
+**`workshop.yaml`**:
 ```yaml
 version: v1
 
@@ -546,28 +727,32 @@ base:
   containerFile: ./Containerfile.base
 
 steps:
-  - id: step-1-intro
-    title: "Introduction"
-    markdownFile: ./docs/step-1.md
-    files:
-      - path: /workspace/README.md
-        content: "Welcome to the workshop!"
-    commands:
-      - echo "Step 1 complete" > /workspace/status.txt
+  - step-1-intro
+  - step-2-advanced
+```
 
-  - id: step-2-advanced
-    title: "Advanced Topics"
-    markdownFile: ./docs/step-2.md
-    files:
-      - path: /workspace/advanced.sh
-        source: ./step-2/advanced.sh
-    commands:
-      - chmod +x /workspace/advanced.sh
-    goss: |
-      file:
-        /workspace/advanced.sh:
-          exists: true
-          mode: "0755"
+**`steps/step-2-advanced/step.yaml`**:
+```yaml
+title: "Advanced Topics"
+files:
+  - source: advanced.sh
+    target: /workspace/advanced.sh
+    mode: "0755"
+commands:
+  - chmod +x /workspace/advanced.sh
 ```
 
 When using a custom base image (not a `workshop-base:*` image), the author must install the required platform components manually. See [Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements) for details.
+
+### Draft Steps
+
+Steps that exist as directories under `steps/` but are not listed in `workshop.yaml` are ignored by the build pipeline. This is useful for work-in-progress steps:
+
+```
+my-workshop/
+  workshop.yaml              # steps: [step-1-intro, step-2-deploy]
+  steps/
+    step-1-intro/             # ✓ built
+    step-2-deploy/            # ✓ built
+    step-3-draft/             # ✗ ignored — not in manifest
+```

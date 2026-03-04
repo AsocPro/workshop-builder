@@ -12,10 +12,19 @@ There is no SQLite database, no separate distribution artifact, and no external 
 
 - **No separate artifact to manage** — the image is the complete package
 - **`docker run` just works** — no CLI, no config mount, no database delivery
-- **Human-readable** — inspect with `cat`, `ls`, standard tooling
+- **Human-inspectable** — inspect with `cat`, `ls`, standard tooling
 - **OCI layer efficiency** — metadata directory is one layer shared across all step images
 - **Simple backend** — read files from disk, no database driver or query layer
 - **Non-linear navigation** — all steps' metadata available in every image
+
+## Why JSON (Not YAML)
+
+The author writes YAML (`workshop.yaml`, per-step `step.yaml`). The build pipeline compiles metadata into JSON for the `/workshop/` directory. This is intentional:
+
+- **Zero runtime dependencies** — the backend reads metadata with Go's `encoding/json` (stdlib). No YAML parser needed in the backend binary.
+- **Unambiguous types** — JSON has explicit types, avoiding YAML's implicit type coercion.
+- **Clear boundary** — different format from the author-facing YAML signals "compiled output, don't hand-edit."
+- **`goss.yaml` stays YAML** — goss expects YAML and consumes it directly. The backend never parses goss specs — it shells out to `goss validate` and reads JSON results from stdout. The mixed formats in `/workshop/` are fine because they have different consumers.
 
 ## Filesystem Layout
 
@@ -23,12 +32,19 @@ There is no SQLite database, no separate distribution artifact, and no external 
 
 ```
 /workshop/
-  ├── workshop.json                     # identity, navigation mode, step list, LLM config
+  ├── workshop.json                     # identity, navigation mode, step list
+  ├── prompts/                          # LLM system prompt overrides (optional)
+  │   ├── hints.md
+  │   ├── explain.md
+  │   └── solve.md
   ├── steps/
   │   ├── step-pods/
   │   │   ├── meta.json                 # title, position, group, requires
   │   │   ├── content.md                # tutorial markdown
   │   │   ├── goss.yaml                 # validation spec (optional)
+  │   │   ├── hints.md                  # static hints content (optional)
+  │   │   ├── explain.md                # static explanation content (optional)
+  │   │   ├── solve.md                  # static solution content (optional)
   │   │   ├── llm.json                  # LLM config (optional)
   │   │   └── llm-docs/                 # reference docs for LLM context (optional)
   │   │       ├── kubectl-cheatsheet.md
@@ -110,7 +126,10 @@ Per-step metadata at `/workshop/steps/<id>/meta.json`.
   "group": "basics",
   "position": 0,
   "hasGoss": true,
-  "hasLlm": true
+  "hasLlm": true,
+  "hasHints": true,
+  "hasExplain": false,
+  "hasSolve": true
 }
 ```
 
@@ -123,14 +142,21 @@ Per-step metadata at `/workshop/steps/<id>/meta.json`.
 | `requires` | array | Prerequisite step IDs (omitted if none) |
 | `hasGoss` | boolean | Whether `/workshop/steps/<id>/goss.yaml` exists |
 | `hasLlm` | boolean | Whether `/workshop/steps/<id>/llm.json` exists |
+| `hasHints` | boolean | Whether `/workshop/steps/<id>/hints.md` exists |
+| `hasExplain` | boolean | Whether `/workshop/steps/<id>/explain.md` exists |
+| `hasSolve` | boolean | Whether `/workshop/steps/<id>/solve.md` exists |
 
 ## Schema: content.md
 
-Tutorial markdown at `/workshop/steps/<id>/content.md`. Raw markdown content — resolved from either the `markdown` or `markdownFile` field in `workshop.yaml` at build time. Rendered by the frontend.
+Tutorial markdown at `/workshop/steps/<id>/content.md`. Copied directly from the step's `content.md` source file at build time. Rendered by the frontend.
+
+## Schema: hints.md / explain.md / solve.md
+
+Static help content at `/workshop/steps/<id>/hints.md`, `explain.md`, and `solve.md`. Copied directly from the step's source files at build time. Each is optional — presence determines which help modes are available for the step. Rendered by the frontend when the student clicks the corresponding help button. See [Help System](../platform/llm-help.md) for the full behavior matrix.
 
 ## Schema: goss.yaml
 
-Goss validation spec at `/workshop/steps/<id>/goss.yaml`. Raw goss YAML — resolved from either the `goss` or `gossFile` field in `workshop.yaml`. Present only for steps that have validation.
+Goss validation spec at `/workshop/steps/<id>/goss.yaml`. Copied directly from the step's `goss.yaml` source file at build time. Present only for steps that have a `goss.yaml` in their step directory.
 
 ## Schema: llm.json
 
@@ -237,9 +263,11 @@ The `/workshop/` metadata directory is typically under 1MB for a workshop with 1
 | Component | Approximate Size |
 |---|---|
 | `workshop.json` | < 2 KB |
+| `prompts/*.md` | < 5 KB each |
 | Per-step `meta.json` | < 1 KB each |
 | Per-step `content.md` | 1–20 KB each |
 | Per-step `goss.yaml` | < 5 KB each |
+| Per-step `hints.md` / `explain.md` / `solve.md` | 1–10 KB each |
 | Per-step `llm.json` | < 1 KB each |
 | Per-step `llm-docs/` | 1–50 KB each |
 

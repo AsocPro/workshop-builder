@@ -74,7 +74,7 @@ To reorder steps, edit the `steps:` list in `workshop.yaml` and reorder the entr
 
 ## Version Control Integration
 
-`workshop.yaml` is the version-controllable source of truth for a workshop. Commit it to Git along with any local source files referenced by `files[].source` entries.
+The workshop directory is the version-controllable source of truth for a workshop. Commit `workshop.yaml`, per-step directories (`step.yaml`, `content.md`, `files/`, etc.) to Git.
 
 Unlike the previous snapshot-based model, there is no binary authoring state to manage. The full workshop definition is human-readable text. Branching, diffing, pull requests, and code review work naturally.
 

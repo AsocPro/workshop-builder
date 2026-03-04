@@ -22,7 +22,7 @@ The `workshop.yaml` format is the single most consequential input decision. It d
 - [x] Add example workshop.yaml files for common workshop patterns.
 - [x] Document the image tagging convention (`<workshop.image>:<step-id>`).
 - [x] Document incremental rebuild strategy (`--from-step`).
-- [x] Add `markdown` / `markdownFile` fields per step.
+- [x] Add per-step `content.md` convention file for tutorial markdown.
 - [x] Clarify file deletion — explicit `rm` commands only.
 - [x] Rename workshop.yaml → workshop.yaml (done; step-spec.md removed).
 - [x] Add navigation modes (`linear`, `free`, `guided`) and step `group`/`requires` fields.

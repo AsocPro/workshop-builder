@@ -117,7 +117,7 @@ The following components must be present in the custom base image for the worksh
 |---|---|---|---|
 | tini | `/sbin/tini` | PID 1 init — zombie reaping, signal forwarding | Static binary; download from [tini releases](https://github.com/krallin/tini/releases) |
 | workshop-backend | `/usr/local/bin/workshop-backend` | Runtime engine — web UI, API, terminal proxy | Static Go binary with embedded assets; provided by platform releases |
-| goss | `/usr/local/bin/goss` | Step validation | Static binary; download from [goss releases](https://github.com/goss-org/goss/releases). Only required if any step uses `goss` or `gossFile`. |
+| goss | `/usr/local/bin/goss` | Step validation | Static binary; download from [goss releases](https://github.com/goss-org/goss/releases). Only required if any step has a `goss.yaml` file. |
 | asciinema | `/usr/bin/asciinema` | Terminal session recording | Python package or static build. Only required if session recording is enabled. |
 | workshop-platform.bashrc | `/etc/workshop-platform.bashrc` | Shell instrumentation for command logging | Plain shell script; provided by platform releases |
 

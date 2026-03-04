@@ -28,8 +28,9 @@ This keeps the library portable and testable without infrastructure dependencies
 
 ### Workshop Spec Parsing
 
-- Parse `workshop.yaml` into internal representation
-- Validate against schema (required fields, URL-safe step IDs, mutually exclusive file entry fields, local source file existence, markdown field mutual exclusion)
+- Parse `workshop.yaml` manifest and per-step `step.yaml` files from the [split file structure](../definition/workshop.md)
+- Discover convention files (`content.md`, `goss.yaml`, `llm-docs/`) by presence in each step directory
+- Validate against schema (required fields, URL-safe step IDs, step directory existence, convention file presence, source file existence in `files/` subdirectories)
 - Reject invalid specs with structured errors that include the field path and a human-readable message
 
 ### CRD Generation
@@ -60,13 +61,13 @@ TODO: Define the Go package layout. Proposed structure:
 
 ```
 pkg/
-  workshop/     # workshop.yaml parser, types, and validation
+  workshop/     # workshop.yaml + step.yaml parser, types, and validation
   crd/          # WorkspaceTemplate and WorkspaceInstance types and generation
   capability/   # backend capability matrix and enforcement
   types/        # shared domain types used across packages
 ```
 
-`pkg/workshop` replaces the former `pkg/compose` and `pkg/stepspec` packages. There is no `pkg/translate` package — Compose-to-Kubernetes translation is removed. There is no `pkg/workspace` package — workspace deployment config lives in the CRD, authored directly by operators.
+`pkg/workshop` parses the split file structure: the `workshop.yaml` manifest, per-step `step.yaml` files, and discovers convention files (`content.md`, `goss.yaml`, `llm-docs/`) by presence. There is no `pkg/translate` package — Compose-to-Kubernetes translation is removed. There is no `pkg/workspace` package — workspace deployment config lives in the CRD, authored directly by operators.
 
 ## Testing Strategy
 

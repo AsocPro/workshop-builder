@@ -22,10 +22,10 @@ Everything an author creates to define a workshop.
 
 | Doc | What It Covers |
 |---|---|
-| [Workshop Spec](./definition/workshop.md) | `workshop.yaml` — per-step container image build recipes, tutorial content, navigation, LLM config |
-| [Authoring](./definition/authoring.md) | CLI proxy model — recording commands and files to `workshop.yaml` |
+| [Workshop Spec](./definition/workshop.md) | `workshop.yaml` manifest + per-step directories — build recipes, tutorial content, navigation, LLM config |
+| [Authoring](./definition/authoring.md) | CLI proxy model — recording commands and files to step directories |
 
-An author writes a single `workshop.yaml` (via the CLI proxy or directly). Deployment behavior (lifecycle, isolation, cluster mode, resources, access) is operator configuration — it lives in the [WorkspaceTemplate CRD](./platform/crds.md), not in any author-facing file.
+An author writes a `workshop.yaml` manifest (step ordering, identity, navigation) and per-step directories with `step.yaml`, `content.md`, and content files (via the CLI proxy or directly). Deployment behavior (lifecycle, isolation, cluster mode, resources, access) is operator configuration — it lives in the [WorkspaceTemplate CRD](./platform/crds.md), not in any author-facing file.
 
 ---
 
@@ -60,10 +60,10 @@ How workshops are compiled into portable, distributable artifacts.
 
 | Doc | What It Covers |
 |---|---|
-| [Compilation](./artifact/compilation.md) | Dagger build pipeline — `workshop.yaml` → OCI images with baked-in metadata |
+| [Compilation](./artifact/compilation.md) | Dagger build pipeline — workshop definition → OCI images with baked-in JSON metadata |
 | [Flat File Artifact](./artifact/flat-file-artifact.md) | In-image metadata format (`/workshop/` filesystem layout) |
 
-Compilation transforms `workshop.yaml` into a set of tagged OCI images. Each image contains the complete workshop metadata as flat files under `/workshop/` — no separate database or distribution artifact.
+Compilation transforms the workshop definition (manifest + per-step directories) into a set of tagged OCI images. Author-facing YAML is compiled to JSON. Each image contains the complete workshop metadata as flat files under `/workshop/` — no separate database or distribution artifact.
 
 ---
 
@@ -83,7 +83,7 @@ The student UI is served directly from inside the workspace container by the bac
 ## Core Principles
 
 1. **Kubernetes is the authoritative multi-tenant control plane.**
-2. **`workshop.yaml` defines what container images contain** — never lifecycle or isolation.
+2. **The workshop definition defines what container images contain** — never lifecycle or isolation.
 3. **Runtime must be simpler than authoring.**
 4. **Reset must be deterministic** — jumping to any step produces identical state.
 5. **Each step is a complete OCI image** — no diffs or patch chains at runtime.
@@ -96,11 +96,12 @@ The student UI is served directly from inside the workspace container by the bac
 
 ```
 Author creates:
-  workshop.yaml
+  workshop.yaml (manifest)
+  steps/<id>/step.yaml + content.md + files/
   (written via CLI proxy or directly)
             │
     workshop build compile
-    (Dagger pipeline)
+    (Dagger pipeline — compiles YAML → JSON)
             │
      OCI images pushed to registry
      (one per step, self-contained)

@@ -2,17 +2,21 @@
 
 ## Purpose
 
-Transform a [`workshop.yaml`](../definition/workshop.md) and local source files into a set of tagged OCI images. Each step becomes one immutable image representing the **completed reference state** of that step. All workshop metadata — step definitions, tutorial content, goss specs, LLM configuration — is baked into each image as flat files under `/workshop/`.
+Transform a [workshop definition](../definition/workshop.md) — the `workshop.yaml` manifest and per-step directories — into a set of tagged OCI images. Each step becomes one immutable image representing the **completed reference state** of that step. All workshop metadata — step definitions, tutorial content, goss specs, LLM configuration — is compiled into JSON and baked into each image as flat files under `/workshop/`.
 
 There is no separate distribution artifact. The container image IS the workshop.
 
 ## Input
 
-- `workshop.yaml` (validated by [Shared Go Library](../platform/shared-go-library.md))
-- Local source files referenced by `files[].source` entries
-- Markdown files referenced by `steps[].markdownFile` entries
-- Goss spec files referenced by `steps[].gossFile` entries
-- LLM doc files referenced by `steps[].llm.docs` entries
+- `workshop.yaml` manifest (validated by [Shared Go Library](../platform/shared-go-library.md))
+- `prompts/` directory — LLM system prompt overrides (if present)
+- Per-step directories under `steps/`:
+  - `step.yaml` — build recipe and metadata
+  - `content.md` — tutorial markdown
+  - `goss.yaml` — validation spec (if present)
+  - `hints.md`, `explain.md`, `solve.md` — static help content (if present)
+  - `files/` — content files referenced by file mappings
+  - `llm-docs/` — LLM reference documents (if present)
 - Registry credentials (for pushing images)
 
 ## Output
@@ -21,7 +25,16 @@ There is no separate distribution artifact. The container image IS the workshop.
 |---|---|
 | Tagged OCI images | One image per step, pushed to a container registry |
 
-The `workshop.yaml` and local source files are **not** distributed — only the images in the registry are needed at runtime. Each image contains the complete workshop metadata as flat files.
+The workshop source files are **not** distributed — only the images in the registry are needed at runtime. Each image contains the complete workshop metadata as compiled JSON flat files.
+
+### Why JSON for Compiled Artifacts
+
+The build pipeline compiles author-facing YAML into JSON for the baked `/workshop/` metadata. This is intentional:
+
+- **Zero runtime dependencies** — the backend reads metadata with Go's `encoding/json` (stdlib). No YAML parser needed in the backend binary.
+- **Unambiguous types** — JSON has explicit types, avoiding YAML's implicit type coercion issues.
+- **Clear boundary** — YAML is for humans (author writes), JSON is compiled output (backend reads). Different format signals "don't hand-edit this."
+- **`goss.yaml` stays YAML** — goss expects YAML, but goss consumes it directly. The backend never parses goss specs — it shells out to `goss validate` and reads JSON results from stdout.
 
 ## Key Properties
 
@@ -29,7 +42,7 @@ The `workshop.yaml` and local source files are **not** distributed — only the 
 - **No patch chains.** No step depends on a previous step at runtime — the image is the state.
 - **No separate metadata artifact.** Workshop metadata is baked into the image, not distributed separately.
 - **Self-contained.** `docker run -p 8080:8080 <image>` — no CLI, no config files, no database.
-- **Deterministic.** Building from the same `workshop.yaml` produces the same image content (modulo base image changes).
+- **Deterministic.** Building from the same workshop source produces the same image content (modulo base image changes).
 - **Incrementally cacheable.** Dagger layer caching skips unchanged steps automatically.
 
 ## Base Images
@@ -48,7 +61,7 @@ When the author specifies a custom `base.image` or `base.containerFile` (not a `
 
 ## Dagger Pipeline
 
-The CLI invokes a Dagger pipeline that builds steps sequentially:
+The CLI invokes a Dagger pipeline that reads the manifest and per-step directories, building steps sequentially:
 
 ```
 workshop-base:<distro> (or custom base.image / base.containerFile)
@@ -57,23 +70,27 @@ workshop-base:<distro> (or custom base.image / base.containerFile)
 Step 1 build:
   FROM base
   → validate platform components present (if custom base)
-  → COPY / write files (from files[] entries)
-  → ENV (from env map)
-  → RUN commands (from commands[])
-  → Bake /workshop/ metadata directory:
-      /workshop/workshop.json           (workshop identity + step list + navigation)
-      /workshop/steps/<id>/meta.json    (per-step metadata)
-      /workshop/steps/<id>/content.md   (tutorial markdown)
-      /workshop/steps/<id>/goss.yaml    (validation spec, if present)
-      /workshop/steps/<id>/llm.json     (LLM config, if present)
-      /workshop/steps/<id>/llm-docs/*   (reference docs, if present)
+  → COPY files from steps/<id>/files/ to targets (per step.yaml mappings)
+  → ENV (from step.yaml env map)
+  → RUN commands (from step.yaml commands[])
+  → Compile and bake /workshop/ metadata directory:
+      /workshop/workshop.json           (compiled from workshop.yaml + all step.yaml files)
+      /workshop/prompts/*.md            (copied from prompts/, if present)
+      /workshop/steps/<id>/meta.json    (compiled from step.yaml)
+      /workshop/steps/<id>/content.md   (copied from steps/<id>/content.md)
+      /workshop/steps/<id>/goss.yaml    (copied from steps/<id>/goss.yaml, if present)
+      /workshop/steps/<id>/hints.md     (copied from steps/<id>/hints.md, if present)
+      /workshop/steps/<id>/explain.md   (copied from steps/<id>/explain.md, if present)
+      /workshop/steps/<id>/solve.md     (copied from steps/<id>/solve.md, if present)
+      /workshop/steps/<id>/llm.json     (compiled from step.yaml llm config, if present)
+      /workshop/steps/<id>/llm-docs/*   (copied from steps/<id>/llm-docs/, if present)
   → verify ENTRYPOINT is set (custom bases must set this themselves)
   → push as <workshop.image>:<step-1-id>
       │
       ▼
 Step 2 build:
   FROM <workshop.image>:<step-1-id>
-  → COPY / write files
+  → COPY files
   → ENV
   → RUN commands
   → push as <workshop.image>:<step-2-id>
@@ -94,12 +111,13 @@ The `/workshop/` directory is baked into the first step image and inherited by a
 - LLM context assembly — the help system can reference any step's configuration
 - Progress tracking — the backend knows the full step graph for completion tracking
 
-The metadata is written once (in the step 0 build) and inherited unchanged through OCI layers. Subsequent steps only add their `/workspace/` content changes.
+The metadata is written once (in the step 1 build) and inherited unchanged through OCI layers. Subsequent steps only add their `/workspace/` content changes.
 
-### Workshop.json Generation
+### Compilation: YAML Source → JSON Artifacts
 
-The pipeline generates `/workshop/workshop.json` from `workshop.yaml`:
+The pipeline compiles the author's YAML source files into JSON artifacts for the backend:
 
+**`workshop.yaml` + all `step.yaml` files → `/workshop/workshop.json`**:
 ```json
 {
   "name": "explore-kubernetes",
@@ -114,25 +132,22 @@ The pipeline generates `/workshop/workshop.json` from `workshop.yaml`:
 }
 ```
 
-### Per-Step Metadata Files
-
-For each step, the pipeline writes:
-
-**`/workshop/steps/<id>/meta.json`**:
+**Each `step.yaml` + convention files → `/workshop/steps/<id>/meta.json`**:
 ```json
 {
   "id": "step-pods",
   "title": "Working with Pods",
   "group": "basics",
-  "position": 0
+  "position": 0,
+  "hasGoss": true,
+  "hasLlm": true,
+  "hasHints": true,
+  "hasExplain": false,
+  "hasSolve": true
 }
 ```
 
-**`/workshop/steps/<id>/content.md`**: resolved from `markdown` or `markdownFile` field.
-
-**`/workshop/steps/<id>/goss.yaml`**: resolved from `goss` or `gossFile` field (if present).
-
-**`/workshop/steps/<id>/llm.json`**: resolved from step-level `llm` config (if present):
+**Each `step.yaml` with `llm` config → `/workshop/steps/<id>/llm.json`**:
 ```json
 {
   "context": "Common mistake: students forget the -n namespace flag.",
@@ -140,7 +155,14 @@ For each step, the pipeline writes:
 }
 ```
 
-**`/workshop/steps/<id>/llm-docs/`**: directory containing copies of files referenced by `llm.docs` entries (if present).
+Files that are already in their final format are copied directly:
+- `prompts/*.md` → `/workshop/prompts/*.md` (if present)
+- `steps/<id>/content.md` → `/workshop/steps/<id>/content.md`
+- `steps/<id>/goss.yaml` → `/workshop/steps/<id>/goss.yaml` (if present)
+- `steps/<id>/hints.md` → `/workshop/steps/<id>/hints.md` (if present)
+- `steps/<id>/explain.md` → `/workshop/steps/<id>/explain.md` (if present)
+- `steps/<id>/solve.md` → `/workshop/steps/<id>/solve.md` (if present)
+- `steps/<id>/llm-docs/*` → `/workshop/steps/<id>/llm-docs/*` (if present)
 
 ## Custom Base Image Validation
 
@@ -150,19 +172,17 @@ When building from a custom base image (`base.image` or `base.containerFile`), t
 
 ## Incremental Rebuilds
 
-Dagger's cache provides incremental builds natively: if a step's inputs (files, env, commands, and parent image) are unchanged, Dagger skips the rebuild of that layer. 
+Dagger's cache provides incremental builds natively: if a step's inputs (files, env, commands, and parent image) are unchanged, Dagger skips the rebuild of that layer.
 
 ## Validation During Compilation
 
-Before the Dagger build starts, the shared library validates the `workshop.yaml`:
+Before the Dagger build starts, the shared library validates the workshop structure:
 
-- Schema validation (required fields, type correctness, URL-safe IDs)
-- Source file existence (all `files[].source` paths exist on disk)
-- Markdown file existence (all `markdownFile` paths exist on disk)
-- Markdown mutual exclusion (`markdown` and `markdownFile` not both set)
-- Goss file existence (all `gossFile` paths exist on disk)
-- Goss mutual exclusion (`goss` and `gossFile` not both set)
-- LLM doc file existence (all `llm.docs` paths exist on disk)
+- Manifest schema validation (required fields, type correctness, URL-safe IDs)
+- Step directory existence (every listed step has a `steps/<id>/` directory)
+- Convention file existence (`step.yaml` and `content.md` present in each step directory)
+- Source file existence (all `files[].source` entries exist in `steps/<id>/files/`)
+- LLM docs validation (`llm-docs/` not empty if present)
 - Navigation consistency (`group`/`requires` not used in `linear` mode)
 - Step ordering (IDs are unique, at least one step present)
 - Prerequisite graph (no cycles in `requires` references)

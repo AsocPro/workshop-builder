@@ -1,14 +1,37 @@
-# LLM Help — Contextual Student Assistance
+# Help System — Static Content and LLM Assistance
 
 ## Purpose
 
-A help button in the tutorial panel that reads the student's command history, goss validation results, step content, and instructor-provided context to give contextual hints. The LLM never gives away the answer in `hints` mode — it nudges students toward the solution.
+A help system that provides students with hints, explanations, and solutions for each step. Works at two levels: **static help content** (authored markdown, no infrastructure required) and **LLM-generated help** (contextual, personalized, requires API key). Both are optional and complement each other.
 
-## Configuration
+## Help Modes
 
-LLM help is configured at two levels:
+| Mode | Behavior | Use Case |
+|---|---|---|
+| `hints` | Nudges and leading questions. Never gives the answer directly. | Default. The learning is in the discovery. |
+| `explain` | Explains concepts and shows related examples, but not the exact solution. | When understanding "why" matters more than "how". |
+| `solve` | Provides direct solutions with explanation. | When the learning is in understanding the solution, not finding it. |
 
-### Operator-Level (Required for LLM to be active)
+## Static Help Content
+
+Authors provide per-step help as convention-named markdown files in the step directory:
+
+```
+steps/step-pods/
+  hints.md       # static hints content
+  explain.md     # static explanation content
+  solve.md       # static solution content
+```
+
+These files are baked into the image at `/workshop/steps/<id>/hints.md`, `/workshop/steps/<id>/explain.md`, `/workshop/steps/<id>/solve.md`. When a student clicks a help mode button, the backend serves the corresponding file directly — no API call, no LLM infrastructure needed.
+
+Static help works everywhere: Docker local mode without an API key, air-gapped environments, workshops where LLM costs aren't justified. Every workshop can have a help system.
+
+## LLM Help (Optional Layer)
+
+When an operator configures an LLM provider, the help system becomes dynamic and contextual.
+
+### Operator-Level Configuration (Required for LLM to be active)
 
 LLM provider configuration is an operator concern, set in the [WorkspaceTemplate CRD](./crds.md):
 
@@ -23,40 +46,56 @@ spec:
       defaultMode: hints
 ```
 
-If no `llm` config is present in the WorkspaceTemplate, the help button is not shown.
+If no `llm` config is present in the WorkspaceTemplate, LLM features are disabled. Static help content still works.
 
-### Per-Step (Author-Configured)
+### Per-Step LLM Context (Author-Configured)
 
-Authors configure per-step help context in `workshop.yaml`:
+Authors configure per-step LLM context in `step.yaml`:
 
 ```yaml
-steps:
-  - id: step-pods
-    llm:
-      context: |
-        Common mistake: students forget the -n namespace flag.
-        The correct namespace for this exercise is "workshop".
-      docs:
-        - ./docs/kubectl-cheatsheet.md
+llm:
+  context: |
+    Common mistake: students forget the -n namespace flag.
+    The correct namespace for this exercise is "workshop".
 ```
 
-## Help Modes
+Reference docs are placed in the step's `llm-docs/` directory — no configuration needed. If `llm-docs/` exists and contains files, they are included in LLM context assembly.
 
-| Mode | Behavior | Use Case |
+### Workshop-Level Prompt Overrides
+
+Authors can override the default system prompts for each help mode by placing markdown files in the `prompts/` directory at the workshop root:
+
+```
+my-workshop/
+  prompts/
+    hints.md       # overrides the default hints system prompt
+    explain.md     # overrides the default explain system prompt
+    solve.md       # overrides the default solve system prompt
+```
+
+These are baked into the image at `/workshop/prompts/`. The backend ships sensible defaults; these files replace them entirely when present. Use this for workshops that need a different pedagogical style (e.g., a security workshop that wants a more Socratic approach).
+
+## Help Behavior Matrix
+
+The backend resolves help requests based on what's available:
+
+| Static File | LLM Configured | Behavior |
 |---|---|---|
-| `hints` | Nudges and leading questions. Never gives the answer directly. | Default. The learning is in the discovery. |
-| `explain` | Explains concepts and shows related examples, but not the exact solution. | When understanding "why" matters more than "how". |
-| `solve` | Provides direct solutions with explanation. | When the learning is in understanding the solution, not finding it. |
+| No | No | Help button disabled for this mode |
+| Yes | No | Static content rendered directly — no API call |
+| No | Yes | LLM generates help using step context |
+| Yes | Yes | Static content included as reference in LLM context; LLM builds on the author's content |
 
-The mode is set by the operator (via `llm.defaultMode` in the WorkspaceTemplate). If not set, `hints` is used.
+The help button for each mode is shown if either a static file exists or LLM is configured. The UI indicates whether the response is static or LLM-generated.
 
 ## Context Assembly
 
-When the student clicks Help, the backend assembles a prompt context from multiple sources:
+When the student clicks Help and LLM is configured, the backend assembles a prompt context from multiple sources:
 
 ```
 ┌─────────────────────────────────────────────────┐
 │ System prompt                                    │
+│   - Default or overridden (from /workshop/prompts/) │
 │   - Role: workshop teaching assistant            │
 │   - Mode: hints / explain / solve                │
 │   - Rules: don't give answers in hints mode, etc │
@@ -64,6 +103,7 @@ When the student clicks Help, the backend assembles a prompt context from multip
 │ Step context                                     │
 │   - Step title and tutorial markdown (content.md)│
 │   - Instructor-provided context (llm.json)       │
+│   - Static help content (hints.md/explain.md/solve.md) │
 │   - Reference docs (llm-docs/*)                  │
 ├─────────────────────────────────────────────────┤
 │ Student state                                    │
@@ -79,8 +119,10 @@ When the student clicks Help, the backend assembles a prompt context from multip
 
 | Source | File | What's Included |
 |---|---|---|
+| System prompt override | `/workshop/prompts/<mode>.md` | Custom system prompt for this mode (if present) |
 | Tutorial content | `/workshop/steps/<id>/content.md` | Full step markdown |
 | Instructor context | `/workshop/steps/<id>/llm.json` → `context` | Author-written hints about common mistakes |
+| Static help content | `/workshop/steps/<id>/hints.md` (or `explain.md`, `solve.md`) | Author-curated help for the active mode — included as reference material |
 | Reference docs | `/workshop/steps/<id>/llm-docs/*` | Cheat sheets, guides, API references |
 | Recent commands | `/workshop/runtime/command-log.jsonl` | Last 20 commands with exit codes |
 | Goss results | Last `goss_result` event from `state-events.jsonl` | Pass/fail per check |
@@ -205,19 +247,21 @@ TODO: Define who provides the LLM API key in Docker local mode. The student runs
 
 If no `llm` config is present in the WorkspaceTemplate:
 
-- The help button is not rendered in the UI
+- LLM-powered help is disabled — no API calls are made
 - The `/api/llm/*` endpoints return `404 Not Found`
 - No LLM-related files appear in `/workshop/runtime/`
+- **Static help content still works** — if `hints.md`, `explain.md`, or `solve.md` exist for a step, those help buttons are shown and the content is served directly
+- Steps with no static help files and no LLM have no help buttons
 
-The workshop functions exactly as it would without LLM support. LLM is purely additive.
+LLM is purely additive. Static help content ensures every workshop can offer assistance regardless of infrastructure.
 
 ## Relationship to Other Components
 
 | Component | Relationship |
 |---|---|
-| [Workshop Spec](../definition/workshop.md) | Per-step `llm` config (mode, context, docs) in workshop.yaml |
+| [Workshop Spec](../definition/workshop.md) | Per-step `llm` config in step.yaml, static help files, workshop-level prompt overrides |
 | [WorkspaceTemplate CRD](./crds.md) | LLM provider config (provider, model, apiKeyEnv) |
-| [Backend Service](./backend-service.md) | Handles LLM API calls and serves help endpoints |
+| [Backend Service](./backend-service.md) | Serves static help content and handles LLM API calls |
 | [Instrumentation](./instrumentation.md) | Command log provides context for LLM prompts |
-| [Flat File Artifact](../artifact/flat-file-artifact.md) | `llm.json` and `llm-docs/` baked into image |
+| [Flat File Artifact](../artifact/flat-file-artifact.md) | `llm.json`, `llm-docs/`, `hints.md`, `explain.md`, `solve.md`, and `prompts/` baked into image |
 | [Aggregation](./aggregation.md) | Vector ships LLM history to Postgres in K8s mode |
