@@ -125,7 +125,7 @@ When the student clicks Help and LLM is configured, the backend assembles a prom
 | Static help content | `/workshop/steps/<id>/hints.md` (or `explain.md`, `solve.md`) | Author-curated help for the active mode — included as reference material |
 | Reference docs | `/workshop/steps/<id>/llm-docs/*` | Cheat sheets, guides, API references |
 | Recent commands | `/workshop/runtime/command-log.jsonl` | Last 20 commands with exit codes |
-| Goss results | Last `goss_result` event from `state-events.jsonl` | Pass/fail per check |
+| Goss results | Most recent goss validation result (in-memory) | Pass/fail per check |
 
 ### Token Budget
 

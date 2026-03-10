@@ -27,7 +27,13 @@ The authoritative multi-tenant lifecycle engine. The Operator is the only compon
 
 ## Step Transitions & Reset
 
-The operator owns the step transition flow. When a student moves to Step N:
+The operator owns the step transition flow. The backend inside the workspace container cannot initiate its own replacement — transitions must be driven by an external control plane.
+
+The operator sets `WORKSHOP_MANAGEMENT_URL` on the workspace container, pointing to a per-workspace management endpoint it serves. The backend reads this env var at startup and renders a link to the management interface in the student UI. This mirrors the pattern used in local mode (where the CLI management server provides the URL). The management interface handles step transitions by patching the WorkspaceInstance CRD, which the operator then reconciles.
+
+TODO: Define the exact shape of the operator-hosted management endpoint — whether it is a per-workspace sidecar, a central operator service with per-workspace routes, or served directly by the operator's existing HTTP surface.
+
+When a student moves to Step N:
 
 ```
 1. Resolve image tag for Step N from WorkspaceTemplate spec

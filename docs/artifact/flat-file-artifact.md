@@ -61,8 +61,8 @@ The author writes YAML (`workshop.yaml`, per-step `step.yaml`). The build pipeli
 ```
 /workshop/runtime/                      # created at runtime, ephemeral
   ├── command-log.jsonl                 # every command + timestamp + exit code
-  ├── state-events.jsonl                # state transitions (IS the state — replayed on startup)
-  ├── session.cast                      # asciinema recording (asciicast v2)
+  ├── state-events.jsonl                # state transitions (append-only event log)
+  ├── session-<timestamp>.cast          # asciinema recording per connection (asciicast v2)
   └── llm-history.jsonl                 # LLM interactions
 ```
 
@@ -194,7 +194,7 @@ Append-only NDJSON file written by the [shell instrumentation](../platform/instr
 
 ### state-events.jsonl
 
-Append-only NDJSON file written by the backend on state transitions. This file IS the state — the backend replays it on startup to reconstruct current progress.
+Append-only NDJSON file written by the backend on state transitions. State is maintained in-memory — this file is **not** replayed on startup. It exists so that in K8s mode, Vector can ship it to Postgres for instructor visibility and analytics.
 
 ```jsonl
 {"ts":"2025-03-15T14:20:00.000Z","event":"connected"}
@@ -211,35 +211,21 @@ Event types:
 |---|---|---|
 | `connected` | — | Browser WebSocket connected |
 | `disconnected` | — | Browser WebSocket disconnected |
-| `step_start` | `step` | Student navigated to a step |
-| `goss_result` | `step`, `passed`, `checks` | Validation result (student-triggered or periodic) |
+| `goss_result` | `step`, `passed`, `checks` | Validation result (student-triggered) |
 
-State reconstruction on startup:
-- Last `step_start` event → active step
-- All `goss_result` events where `passed: true` → completed set
-- Last `connected`/`disconnected` → connection state
+### session-&lt;timestamp&gt;.cast
 
-### session.cast
-
-Asciinema recording in [asciicast v2 format](https://docs.asciinema.org/manual/asciicast/v2/). Written by `asciinema rec` wrapping the terminal shell. See [Instrumentation](../platform/instrumentation.md) for details.
+Asciinema recordings in [asciicast v2 format](https://docs.asciinema.org/manual/asciicast/v2/). One file per connection, named with the ISO 8601 compact start time (e.g. `session-20250315T142000Z.cast`). Written by `asciinema rec` wrapping the terminal shell. See [Instrumentation](../platform/instrumentation.md) for details.
 
 ### llm-history.jsonl
 
 Append-only NDJSON file recording LLM interactions. See [LLM Help](../platform/llm-help.md) for schema details.
 
-## State Derivation (No Separate State File)
+## State Management
 
-There is no `state.json` file. The backend derives current state entirely from `state-events.jsonl`:
+There is no `state.json` file. State is maintained in-memory by the backend and always starts fresh — there is no startup replay. Events are appended to `state-events.jsonl` as they occur; in K8s mode, Vector ships that file to Postgres for aggregation and instructor visibility.
 
-1. On startup, read `state-events.jsonl` line by line
-2. Replay events to reconstruct: active step, completed steps, connection state
-3. Continue appending new events during the session
-
-This event-sourcing approach means:
-- No state corruption from partial writes
-- Full audit trail of every state change
-- Simple recovery — just replay the file
-- In K8s mode, the same file is shipped to Postgres by Vector for aggregation
+**Future consideration:** Flat file state restore — exporting runtime files from a workspace and mounting them into a fresh container to resume where a student left off. Not needed for v1.
 
 ## Distribution
 
@@ -283,7 +269,7 @@ The previous architecture used a SQLite database as a separate distribution arti
 | `steps` table | `steps/<id>/meta.json` + `content.md` + `goss.yaml` |
 | `step_metadata` table | `steps/<id>/meta.json` fields |
 | `navigation` table | `workshop.json` `steps` array with `group`/`requires` |
-| `runtime_state` table | `state-events.jsonl` (event-sourced) |
-| `custom_state` table | Removed (not needed — state is event-sourced) |
+| `runtime_state` table | In-memory state + `state-events.jsonl` (append-only event log) |
+| `custom_state` table | Removed — not needed |
 | Distribution file | Eliminated — metadata baked into image |
 | Per-instance working copy | Eliminated — no database to copy |

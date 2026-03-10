@@ -21,9 +21,20 @@ Single-user execution using Docker as the backend.
 
 Step transitions in local mode: stop current container → pull next step image → start new container. No manifest bundles, no PVC operations.
 
-TODO: Define the step transition mechanism in Docker local mode. The backend runs inside the container and cannot restart its own container. Options: (a) student runs CLI commands from the host to transition, (b) backend exposes a transition API that the CLI watches via polling/SSE, (c) backend has access to the Docker socket (security concern). This is the most critical open design question for the single-user milestone.
+The backend inside the container cannot restart its own container. Instead, the CLI runs a local management server on the host alongside the workspace container. This server handles step transitions and other lifecycle operations, providing a management interface that mirrors what the Operator provides in cluster mode.
 
-TODO: Define what happens to the student's browser session during a step transition in Docker mode. The container is replaced — the WebSocket connection drops. Does the frontend auto-reconnect? Does the CLI print the new URL? Is the port the same?
+### Local Management Server
+
+When `workshop run` starts a workspace, the CLI also starts a local HTTP management server on the host. It passes the server's URL to the workspace container via an environment variable (`WORKSHOP_MANAGEMENT_URL`). The backend reads this variable at startup and exposes a link to the management interface in the student web UI.
+
+The management server:
+- Serves a simple workshop control UI (step list, current step, go-to-step, reset)
+- Handles step transitions: stops the current container, pulls the next step image, starts the new container on the same port
+- Remains alive across container replacements (it is a host process, not inside the container)
+
+This is the same pattern as cluster mode — the backend web UI links out to a management surface, and that surface drives container lifecycle. The backend itself never orchestrates its own replacement.
+
+The management server (or CLI output) informs the student when the new container is ready and they can reload their browser. No auto-reconnect logic is needed in the backend or frontend.
 
 ### Cluster Mode
 

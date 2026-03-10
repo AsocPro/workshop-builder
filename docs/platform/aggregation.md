@@ -13,7 +13,7 @@ Student container (identical image, identical behavior)
   │
   ├── /workshop/runtime/command-log.jsonl ──┐
   ├── /workshop/runtime/state-events.jsonl ─┤ shared volume
-  ├── /workshop/runtime/session.cast ───────┤
+  ├── /workshop/runtime/session-*.cast ─────┤
   └── /workshop/runtime/llm-history.jsonl ──┘
                                             │
                                      Vector sidecar
@@ -108,7 +108,7 @@ batch.timeout_secs = 2
 ```toml
 [sources.recording]
 type = "file"
-include = ["/workshop/runtime/session.cast"]
+include = ["/workshop/runtime/session-*.cast"]
 read_from = "beginning"
 
 [sinks.recording_s3]
@@ -205,12 +205,15 @@ CREATE TABLE command_log (
     timestamp       TIMESTAMP NOT NULL
 );
 
--- Asciinema recording references
+-- Asciinema recording references (one row per session file)
 CREATE TABLE recording_refs (
-    workspace_id    TEXT PRIMARY KEY,
+    workspace_id    TEXT NOT NULL,
+    filename        TEXT NOT NULL,          -- e.g. session-20250315T142000Z.cast
+    started_at      TIMESTAMP NOT NULL,     -- parsed from filename
     storage_path    TEXT NOT NULL,
     last_sync_byte  BIGINT NOT NULL,
-    updated_at      TIMESTAMP NOT NULL
+    updated_at      TIMESTAMP NOT NULL,
+    PRIMARY KEY (workspace_id, filename)
 );
 
 -- LLM interaction history

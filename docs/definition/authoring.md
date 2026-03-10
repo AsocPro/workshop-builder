@@ -78,6 +78,28 @@ The workshop directory is the version-controllable source of truth for a worksho
 
 Unlike the previous snapshot-based model, there is no binary authoring state to manage. The full workshop definition is human-readable text. Branching, diffing, pull requests, and code review work naturally.
 
+## Step Design Best Practices
+
+### Keep Steps Granular
+
+A step represents a discrete, completable unit of work. Prefer smaller steps over large ones. A student who loses their container mid-step has to start that step over — a step that takes 2 minutes to redo is fine; one that takes 20 minutes is a problem.
+
+### Design for Crash Recovery
+
+Container state is ephemeral. If a pod or container goes down unexpectedly, the student's in-container filesystem is lost. They will be restarted on the same step and will need to redo it from scratch.
+
+Design each step so that redoing it from scratch is quick and unsurprising:
+
+- **Avoid long setup that goss cannot verify.** If a step requires 10 minutes of setup before the "real" task, a crash means 10 minutes of work lost. Break the setup into its own step.
+- **Make the goss spec the source of truth for "done".** If everything goss checks can be recreated in a couple of minutes, crash recovery is painless.
+- **Prefer declarative tasks over procedural ones.** Running `kubectl apply -f deployment.yaml` is repeatable with no side effects. Steps that depend on accumulated runtime state (e.g. data written to a database, a long compilation) are harder to recover from.
+
+This is most relevant in cluster mode where pod restarts can happen due to node pressure or scheduling, but applies equally to local Docker mode.
+
+### Validation Should Reflect Completion
+
+Write goss specs that verify the meaningful end state of a step, not incidental intermediate state. If a step's work is easy to redo, the goss spec gives the student a clear target to hit when they start over.
+
 ## Collaboration
 
 Multiple instructors can collaborate by editing `workshop.yaml` in a shared Git repository. The normal Git workflow applies: branch, commit, review, merge.

@@ -44,10 +44,12 @@ Fields moved to the [WorkspaceTemplate CRD](../platform/crds.md). No author-faci
 
 ### 2b. Navigation vs Image Swap (CRITICAL — Cross-cutting)
 
-- [ ] **Define the distinction between "view step content" and "switch workspace to step" in the API and UX.** In free/guided mode, students must browse content without triggering a container restart. The current `POST /api/steps/:id/navigate` is ambiguous. Likely needs two separate actions.
-- [ ] **Define the step transition mechanism in Docker local mode.** The backend is inside the container and cannot restart itself. Options: CLI polling, Docker socket access, or host-side CLI commands. This blocks the single-user milestone.
-- [ ] **Define state persistence across Docker mode step transitions.** Should `/workshop/runtime/` be volume-mounted to preserve completion progress? What volume mount convention?
-- [ ] **Define browser reconnection behavior after step transitions.** The WebSocket drops when the container is replaced. Auto-reconnect? Same port?
+- [x] **Define the distinction between "view step content" and "switch workspace to step".** Content fetching (`GET /api/steps/:id/content`) is view-only — no restart. Step transitions are driven externally (CLI in local mode, Operator in K8s mode). No navigate endpoint needed.
+- [x] **Progress tracking uses goss results, not navigation events.** The completion set (steps with passing goss) is the authoritative progress signal. `step_start` events removed.
+- [x] **Define the step transition mechanism in Docker local mode.** CLI runs a local management server on the host; passes its URL to the container via `WORKSHOP_MANAGEMENT_URL`. Backend renders it as a link in the UI. Management server handles all container lifecycle operations and survives container replacements.
+- [x] **Define the student-initiated step transition surface in cluster mode.** Operator sets `WORKSHOP_MANAGEMENT_URL` pointing to an operator-hosted management endpoint. Same backend pattern as local mode — backend just renders the link.
+- [x] **State persistence across step transitions — not needed.** Each container starts fresh. Students re-validate to re-establish completion status. No volume mount, no save/restore.
+- [x] **Browser reconnection after step transitions.** No auto-reconnect. Management server or CLI notifies the student when the new container is ready; student reloads manually.
 
 ---
 
@@ -101,7 +103,7 @@ The Dagger build pipeline.
 - [x] Define workshop.json schema.
 - [x] Define meta.json, content.md, goss.yaml, llm.json schemas.
 - [x] Define JSONL runtime file formats (command-log, state-events, session.cast, llm-history).
-- [x] Document state derivation from event log (no separate state file).
+- [x] Document state event log format (append-only; in-memory state, no startup replay).
 - [x] Document migration path from SQLite design.
 - [x] Document distribution model (image IS the workshop — no separate artifact).
 
@@ -190,7 +192,7 @@ The Go binary embedded in every step image. **The heart of single-user local mod
 - [x] Document purpose and role — runtime engine inside each workspace container.
 - [x] Document container startup sequence (tini → backend → ttyd/asciinema).
 - [x] Document flat file metadata reading (replaces SQLite lifecycle).
-- [x] Document state derivation from event log replay.
+- [x] Document state event log (append-only; state is in-memory, no startup replay).
 - [x] Document how the binary gets injected (base images or Dagger platform layer).
 - [x] Document step transition behavior (starts fresh on each new container).
 - [x] Document asciinema recording integration.
@@ -202,11 +204,8 @@ The Go binary embedded in every step image. **The heart of single-user local mod
 - [x] Define the full API surface (student + instructor routes).
 - [x] Document connection tracking.
 - [ ] Define frontend framework and asset embedding strategy.
-- [ ] Define the step transition mechanism in Docker local mode (CRITICAL — blocks single-user milestone).
-- [ ] Define "view step" vs "transition to step" API contract — `POST /api/steps/:id/navigate` is ambiguous.
-- [ ] Define state persistence across step transitions in Docker mode (volume mount convention).
-- [ ] Define periodic goss validation configuration mechanism (env var? workshop.yaml field?).
-- [ ] Define browser auto-reconnection behavior after container replacement during step transitions.
+- [x] State persistence across step transitions — not needed. Fresh start every time; re-validate to resume.
+- [x] Browser auto-reconnection after step transitions — not needed. Management UI or CLI handles notification.
 
 ---
 
@@ -397,7 +396,7 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 | 4 | Student UI | frontend | Needs design |
 | 5 | CLI — Local Mode | cli (local) | **Blocked** — SQLite refs removed but step transition mechanism undefined |
 | 6 | Builder GUI | gui | Needs design |
-| **—** | **Single-User Milestone** | | **Blocked on: step transition mechanism, nav vs image swap, state persistence** |
+| **—** | **Single-User Milestone** | | Decisions resolved — ready to implement |
 | 7 | Domain Model & API | shared-go-library, crds | Partially done (SQLite refs cleaned up) |
 | 8 | Cluster Mode | operator, cli (cluster), provisioners, backend-capabilities | Partially done |
 | 9 | Finalize | overview | Mostly done |

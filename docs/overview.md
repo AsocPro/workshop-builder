@@ -118,7 +118,7 @@ Author creates:
    │                           │
  Backend starts:            Operator reconciles:
    - reads /workshop/*        - provisions namespace
-   - replays state events     - deploys step image with Vector sidecar
+   - reads /workshop/*        - deploys step image with Vector sidecar
    - spawns ttyd+asciinema    - manages lifecycle
    - serves student web UI    - step transitions via image swap
    - writes JSONL files           │
@@ -164,10 +164,4 @@ myorg/kubernetes-101:step-1-intro
 
 The following questions must be resolved before implementation. They are tracked as TODOs in the relevant docs:
 
-1. **Step transition mechanism in Docker local mode.** The backend runs inside the container and cannot restart itself. How does a student's browser action (via backend API) trigger the CLI on the host to swap containers? See [CLI](./platform/cli.md) and [Backend Service](./platform/backend-service.md).
-
-2. **Navigation vs image swap UX.** In free/guided navigation, students need to view any step's content without disrupting their terminal session. The distinction between "view step" (no restart) and "switch workspace to step" (image swap) must be clear in the API and UI. See [Workshop Spec](./definition/workshop.md#navigation-vs-image-swap) and [Frontend](./presentation/frontend.md).
-
-3. **State persistence across Docker mode step transitions.** When a container is replaced, `/workshop/runtime/` is lost unless a volume is mounted. Should completion progress persist? If so, what's the volume mount convention? See [Backend Service](./platform/backend-service.md).
-
-4. **LLM API key distribution for Docker mode.** The student runs `docker run -e WORKSHOP_LLM_API_KEY=...`. Who provides the key? Is this an instructor responsibility? See [LLM Help](./platform/llm-help.md).
+1. **LLM API key distribution for Docker mode.** The student runs `docker run -e WORKSHOP_LLM_API_KEY=...`. Who provides the key? Is this an instructor responsibility? See [LLM Help](./platform/llm-help.md).

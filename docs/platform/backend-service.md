@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A Go binary embedded in every workshop container image. It is the runtime engine of each workspace — serving the student web UI, proxying terminal access, managing asciinema recording, tracking student progress via event-sourced state, and mediating LLM help interactions.
+A Go binary embedded in every workshop container image. It is the runtime engine of each workspace — serving the student web UI, proxying terminal access, managing asciinema recording, tracking student progress, and mediating LLM help interactions.
 
 ## Role in the System
 
@@ -22,8 +22,9 @@ tini (as PID 1) handles zombie process reaping and clean signal forwarding. The 
 tini (PID 1)
   └── workshop-backend (PID 2)
         ├── Read /workshop/workshop.json + /workshop/steps/*  (flat file metadata)
+        ├── Read WORKSHOP_MANAGEMENT_URL env var (optional — link shown in UI if set)
         ├── Create /workshop/runtime/ directory
-        ├── Replay /workshop/runtime/state-events.jsonl → reconstruct state
+        ├── Initialize in-memory state (fresh — no replay)
         ├── Spawn ttyd → asciinema rec → /bin/bash  (terminal + recording)
         ├── Start HTTP server (web UI + student API)
         ├── Start file watcher on command-log.jsonl
@@ -42,42 +43,33 @@ On startup, the backend reads the baked-in workshop metadata:
 
 No database, no schema migration, no working copy. The files are baked into the image and read directly.
 
-### State Derivation from Event Log
+### State Event Log
 
-State is derived entirely from `/workshop/runtime/state-events.jsonl`. On startup:
+The backend maintains in-memory state and appends events to `/workshop/runtime/state-events.jsonl` as they occur. State is **not** replayed on startup — the backend always starts fresh.
 
-1. If the file exists, replay events line by line
-2. Last `step_start` event → current active step (if none, default to first step)
-3. All `goss_result` events where `passed: true` → completed step set
-4. Last `connected`/`disconnected` → connection state
-
-During the session, every state change appends a new event:
-- `step_start` — student navigates to a step
-- `goss_result` — validation executed (student-triggered or periodic)
+Events written:
+- `goss_result` — validation executed (student-triggered)
 - `connected` / `disconnected` — WebSocket connect/disconnect
 
-This event-sourcing approach provides:
-- No state corruption from partial writes (append-only)
-- Full audit trail of every state change
-- Simple crash recovery — replay the file
-- Natural shipping to Postgres via Vector in K8s mode
+The event log exists so that in K8s mode, Vector can ship it to Postgres for instructor visibility and analytics. In Docker mode the file accumulates locally but is not read back.
 
 ### Terminal Access + Asciinema Recording
 
 The backend spawns ttyd wrapping the shell in asciinema:
 
 ```
-ttyd <options> -- asciinema rec --stdin --append /workshop/runtime/session.cast -c /bin/bash
+ttyd <options> -- asciinema rec --stdin /workshop/runtime/session-<timestamp>.cast -c /bin/bash
 ```
 
 - `--stdin` captures input for full replay fidelity
-- `--append` allows recording to survive ttyd restarts (reconnections)
-- The resulting `session.cast` is in [asciicast v2 format](https://docs.asciinema.org/manual/asciicast/v2/)
+- Each new connection gets a fresh file named with the ISO 8601 start time (e.g. `session-20250315T142000Z.cast`) — no appending, no timestamp discontinuities
+- The resulting files are in [asciicast v2 format](https://docs.asciinema.org/manual/asciicast/v2/)
 
 The backend:
 - Monitors ttyd; restarts it if it exits unexpectedly
+- On each new connection, generates the timestamp filename before spawning ttyd/asciinema
 - Proxies all browser WebSocket connections to ttyd through a single origin — no CORS issues
-- Serves `session.cast` with HTTP Range support for player seeking
+- Serves session cast files with HTTP Range support for player seeking
 - No nsenter or shared process namespace required — ttyd runs inside the same container
 
 ### Command Log Watching
@@ -96,7 +88,7 @@ See [Instrumentation](./instrumentation.md) for the shell hook implementation.
 
 ### Goss Validation
 
-When a student clicks Validate (or on periodic auto-validation):
+When a student clicks Validate:
 
 1. Read the goss spec from `/workshop/steps/<id>/goss.yaml`
 2. Execute `goss validate -g /workshop/steps/<id>/goss.yaml --format json`
@@ -104,12 +96,6 @@ When a student clicks Validate (or on periodic auto-validation):
 4. Append a `goss_result` event to `state-events.jsonl`
 
 Because every step image contains ALL steps' goss specs, the backend can validate any step regardless of which step image the container was built from. This enables non-linear navigation.
-
-#### Optional Periodic Validation
-
-The backend can optionally run goss validation periodically (configurable interval, default off). Results from periodic validation are NOT shown to the student — they are written only to `state-events.jsonl`. In K8s mode, Vector ships these to the instructor dashboard.
-
-TODO: Define the configuration mechanism for periodic validation interval. Environment variable (e.g., `WORKSHOP_GOSS_INTERVAL=30s`)? Or a field in `workshop.yaml`? Currently undocumented.
 
 ### Non-Linear Navigation
 
@@ -121,11 +107,9 @@ The backend enforces navigation rules based on `workshop.json`:
 | `free` | Any step accessible at any time. |
 | `guided` | Free within unlocked groups. Groups unlock when previous group is completed or via `requires`. |
 
-Progress is tracked as a **completion set** — the set of step IDs where goss validation has passed. The frontend shows a completion matrix rather than a linear progress bar.
+Progress is tracked as a **completion set** — the set of step IDs where goss validation has passed. Goss results are the authoritative progress signal: a passing result adds the step to the completion set and unlocks the next step (in linear/guided modes). The frontend shows a completion matrix rather than a linear progress bar.
 
-**Important distinction:** "Navigating" to a step (viewing its tutorial content, checking its goss spec) does NOT require an image swap. Every image contains all steps' metadata. An image swap only occurs when the student explicitly requests to switch their working environment (reset/transition). See [Workshop Spec — Navigation vs Image Swap](../definition/workshop.md#navigation-vs-image-swap).
-
-TODO: Define the API contract for "view step content" vs "transition workspace to step". Currently `POST /api/steps/:id/navigate` is ambiguous — does it trigger an image swap or just change the viewed step? Likely needs two separate actions: one for viewing (no restart) and one for transitioning (container restart).
+Viewing step content (fetching markdown, checking the goss spec) does NOT require an image swap. Every image contains all steps' metadata. An image swap only occurs when the student explicitly requests to switch their working environment. Step transitions are driven externally: by the CLI in single-user mode, and by the Operator in cluster mode. The backend has no API for initiating its own replacement.
 
 ### LLM Help
 
@@ -153,11 +137,11 @@ The backend instruments the WebSocket proxy for terminal connections:
 |---|---|---|
 | `GET` | `/api/steps` | List all steps with titles, groups, completion status, accessibility |
 | `GET` | `/api/steps/:id/content` | Get step tutorial markdown |
-| `POST` | `/api/steps/:id/navigate` | Navigate to a step (enforces navigation rules) |
 | `POST` | `/api/steps/:id/validate` | Run goss validation, return results |
 | `GET` | `/api/state` | Current state: active step, completed set, navigation mode |
 | `GET` | `/api/commands` | Recent command history (with pagination) |
-| `GET` | `/api/recording` | Serve `session.cast` with HTTP Range support |
+| `GET` | `/api/recordings` | List session recording files with start timestamps |
+| `GET` | `/api/recordings/:filename` | Serve a session cast file with HTTP Range support |
 | `POST` | `/api/llm/help` | Request LLM help (streaming response) |
 | `GET` | `/api/llm/history` | Get LLM interaction history for current step |
 
@@ -203,24 +187,19 @@ When authors use a custom `base.image` or `base.containerFile`, they must instal
 
 ### Cluster Mode
 
-Step transitions are driven by the [Operator](./operator.md) via Deployment image swap. The old pod is replaced by a new pod running the next step's image. The new backend starts fresh, reads flat files, replays state events, and begins serving.
+Step transitions are driven by the [Operator](./operator.md) via Deployment image swap. The old pod is replaced by a new pod running the next step's image. The new backend starts fresh, reads flat files, and begins serving.
 
-The student's browser reconnects to the new backend. The terminal WebSocket session restarts with the new container's shell.
+The management server or CLI notifies the student when the new container is ready. The student reloads their browser manually — no auto-reconnect logic is required.
 
 ### Local Mode
 
 Step transitions are driven by the [CLI](./cli.md): stop current container, start new container from next step image. The backend behavior is identical to cluster mode — it always starts fresh.
 
-TODO: Define the mechanism by which the student's browser (→ backend API) triggers a step transition in Docker local mode. The backend runs inside the container and cannot stop/start its own container. Either: (a) the CLI polls a backend API for transition requests, (b) the backend has Docker socket access (security concern), or (c) the student runs CLI commands from the host. This is the most critical design gap for the single-user milestone.
+The backend cannot initiate its own container replacement. The CLI runs a local management server on the host and passes its URL via `WORKSHOP_MANAGEMENT_URL`. The backend renders this as a link in the student UI. The management server survives container replacements and handles all lifecycle operations. See [CLI — Local Management Server](./cli.md#local-management-server).
 
 ### State Persistence Across Transitions
 
-The `/workshop/runtime/` directory is ephemeral to the container. When a step transition creates a new container:
-- State events are lost (fresh start) in default mode
-- In K8s mode, the Vector sidecar has already shipped events to Postgres before the transition
-- In Docker mode, the CLI can optionally mount a volume for `/workshop/runtime/` to preserve history
-
-TODO: Define whether state persistence across step transitions is required for Docker mode. If state-events.jsonl is preserved via volume mount, the completed set carries over but the workspace filesystem is replaced. Is this the desired behavior? If so, document the volume mount convention. If not, how does the student's completion progress survive step transitions in Docker mode?
+The `/workshop/runtime/` directory is ephemeral to the container. Each new container always starts with fresh in-memory state — there is no save/restore mechanism. The student resumes from the step they were on; goss validation re-establishes their completion status when they re-validate. In K8s mode, the Vector sidecar has already shipped events to Postgres before the transition for instructor visibility.
 
 ## Relationship to Other Components
 
