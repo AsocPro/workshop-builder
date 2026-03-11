@@ -1,0 +1,10 @@
+version: v1
+workshop:
+  name: test-with-goss
+  image: localhost/test-with-goss
+  navigation: linear
+base:
+  image: workshop-base:ubuntu
+steps:
+  - step-one
+  - step-two

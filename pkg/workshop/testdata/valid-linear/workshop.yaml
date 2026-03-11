@@ -1,0 +1,10 @@
+version: v1
+workshop:
+  name: test-linear
+  image: localhost/test-linear
+  navigation: linear
+base:
+  image: workshop-base:ubuntu
+steps:
+  - step-one
+  - step-two

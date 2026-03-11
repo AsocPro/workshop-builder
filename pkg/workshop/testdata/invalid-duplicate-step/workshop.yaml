@@ -1,0 +1,9 @@
+version: v1
+workshop:
+  name: test
+  image: localhost/test
+base:
+  image: workshop-base:ubuntu
+steps:
+  - step-one
+  - step-one

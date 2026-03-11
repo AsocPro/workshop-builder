@@ -1,0 +1,3 @@
+file:
+  /workspace/test.txt:
+    exists: true

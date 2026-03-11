@@ -1,0 +1,8 @@
+version: v1
+workshop:
+  name: test-missing-title
+  image: localhost/test-missing-title
+base:
+  image: workshop-base:ubuntu
+steps:
+  - step-one
