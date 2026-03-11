@@ -29,6 +29,11 @@ The `workshop.yaml` format is the single most consequential input decision. It d
 - [x] Add workshop-level and per-step LLM configuration.
 - [x] Drop all SQLite references — metadata baked as flat files into image.
 - [x] Document base image usage (`workshop-base:{alpine,ubuntu,centos}`).
+- [x] Add `infrastructure` block to workshop.yaml — `cluster` (enabled, provider) and `extraContainers` (name, image, ports, env).
+- [x] Add validation rules for infrastructure block.
+- [x] Add infrastructure examples (cluster workshop, multi-container web workshop).
+- [x] Remove "Cluster provisioning config" from What It Does NOT Contain — it now does contain it.
+- [x] Fix "Workshop Is a Container Image" section — CLI required, no bare `docker run`.
 
 ---
 
@@ -45,11 +50,12 @@ Fields moved to the [WorkspaceTemplate CRD](../platform/crds.md). No author-faci
 ### 2b. Navigation vs Image Swap (CRITICAL — Cross-cutting)
 
 - [x] **Define the distinction between "view step content" and "switch workspace to step".** Content fetching (`GET /api/steps/:id/content`) is view-only — no restart. Step transitions are driven externally (CLI in local mode, Operator in K8s mode). No navigate endpoint needed.
-- [x] **Progress tracking uses goss results, not navigation events.** The completion set (steps with passing goss) is the authoritative progress signal. `step_start` events removed.
+- [x] **Progress tracking uses goss results, not navigation events.** The completion set (steps with passing goss) is the authoritative progress signal.
 - [x] **Define the step transition mechanism in Docker local mode.** CLI runs a local management server on the host; passes its URL to the container via `WORKSHOP_MANAGEMENT_URL`. Backend renders it as a link in the UI. Management server handles all container lifecycle operations and survives container replacements.
 - [x] **Define the student-initiated step transition surface in cluster mode.** Operator sets `WORKSHOP_MANAGEMENT_URL` pointing to an operator-hosted management endpoint. Same backend pattern as local mode — backend just renders the link.
 - [x] **State persistence across step transitions — not needed.** Each container starts fresh. Students re-validate to re-establish completion status. No volume mount, no save/restore.
 - [x] **Browser reconnection after step transitions.** No auto-reconnect. Management server or CLI notifies the student when the new container is ready; student reloads manually.
+- [x] **Student UI does not manage lifecycle.** Step transitions, resets, and image swaps are exclusively CLI (local) and operator/instructor tooling (K8s) responsibilities. The student UI has no such controls.
 
 ---
 
@@ -60,8 +66,6 @@ The authoring and build pipeline. These produce the artifacts consumed by the ru
 ---
 
 ### 3. Authoring (`definition/authoring.md`)
-
-The CLI proxy model for recording workshop steps.
 
 - [x] Rewrite for CLI proxy model (no K8s snapshots).
 - [x] Document what the proxy records (files, env, commands → workshop.yaml).
@@ -75,8 +79,6 @@ The CLI proxy model for recording workshop steps.
 
 ### 4. Compilation (`artifact/compilation.md`)
 
-The Dagger build pipeline.
-
 - [x] Reframe as Dagger pipeline (not snapshot flattening).
 - [x] Document sequential step building and OCI layer inheritance.
 - [x] Document incremental rebuild strategy (`--from-step`).
@@ -86,32 +88,31 @@ The Dagger build pipeline.
 - [x] Document workshop.json generation and per-step metadata files.
 - [x] Document base image usage and custom base image injection.
 - [x] Remove all SQLite references.
+- [x] Include `infrastructure` block in compiled workshop.json output.
+- [x] Update "Self-contained" description — CLI required, no bare `docker run`.
 - [ ] Define what validation occurs during the Dagger build (e.g., RUN command failure behavior).
 - [ ] Provide size estimates for typical OCI image stacks.
 - [ ] Define how the backend binary version is pinned / sourced at compile time.
-- [x] Rename `artifact/sqlite-artifact.md` to `artifact/flat-file-artifact.md` (done).
 
 ---
 
 ### 5. Flat File Artifact (`artifact/flat-file-artifact.md`)
 
-*Formerly "SQLite Artifact" — replaced by flat file design.*
-
 - [x] Replace SQLite schema with flat file filesystem layout.
 - [x] Document `/workshop/` read-only metadata directory structure.
 - [x] Document `/workshop/runtime/` ephemeral runtime data directory.
-- [x] Define workshop.json schema.
+- [x] Define workshop.json schema — including `infrastructure` block (cluster, extraContainers).
 - [x] Define meta.json, content.md, goss.yaml, llm.json schemas.
 - [x] Define JSONL runtime file formats (command-log, state-events, session.cast, llm-history).
 - [x] Document state event log format (append-only; in-memory state, no startup replay).
+- [x] Add `step_viewed` event to state-events schema and example — enables timestamp-based command correlation.
 - [x] Document migration path from SQLite design.
-- [x] Document distribution model (image IS the workshop — no separate artifact).
+- [x] Document distribution model — CLI required; image read via `docker run --rm <image> cat /workshop/workshop.json`.
+- [x] Document infrastructure schema (cluster object, extraContainers array with ports and env).
 
 ---
 
-## Phase A: Base Images + Shell Instrumentation (NEW)
-
-Foundation for monitoring and recording capabilities.
+## Phase A: Base Images + Shell Instrumentation (COMPLETE)
 
 ---
 
@@ -137,7 +138,7 @@ Foundation for monitoring and recording capabilities.
 
 ---
 
-## Phase B: Instructor Monitoring + LLM Help (NEW)
+## Phase B: Instructor Monitoring + LLM Help (COMPLETE)
 
 ---
 
@@ -164,7 +165,7 @@ Foundation for monitoring and recording capabilities.
 
 ---
 
-## Phase C: Aggregation (K8s Only) (NEW)
+## Phase C: Aggregation (K8s Only) (COMPLETE)
 
 ---
 
@@ -181,13 +182,9 @@ Foundation for monitoring and recording capabilities.
 
 ## Phase 3: Backend Runtime (Single-User Mode Core)
 
-The runtime engine running inside each workspace container. This is what makes a step image an interactive learning environment rather than just a container.
-
 ---
 
 ### 6. Backend Service (`platform/backend-service.md`)
-
-The Go binary embedded in every step image. **The heart of single-user local mode.**
 
 - [x] Document purpose and role — runtime engine inside each workspace container.
 - [x] Document container startup sequence (tini → backend → ttyd/asciinema).
@@ -203,15 +200,19 @@ The Go binary embedded in every step image. **The heart of single-user local mod
 - [x] Document SSE event streaming.
 - [x] Define the full API surface (student + instructor routes).
 - [x] Document connection tracking.
-- [ ] Define frontend framework and asset embedding strategy.
-- [x] State persistence across step transitions — not needed. Fresh start every time; re-validate to resume.
-- [x] Browser auto-reconnection after step transitions — not needed. Management UI or CLI handles notification.
+- [x] Define frontend framework and asset embedding — Svelte 5 + Vite, embedded via `//go:embed`.
+- [x] State persistence across step transitions — not needed.
+- [x] Browser auto-reconnection after step transitions — not needed.
+- [x] `WORKSHOP_MANAGEMENT_URL` — always set in local mode (CLI required); may be set in cluster mode.
+- [x] Add `step_viewed` event to state event log on `GET /api/steps/:id/content`.
+- [x] LLM help API is step-scoped — `POST /api/steps/:id/llm/help`, `GET /api/steps/:id/llm/history`.
+- [ ] Define how the backend signals cluster health to the frontend (part of `/api/state` or separate endpoint).
+- [ ] Define LLM capability flag — how does the frontend know LLM is configured? Include in `/api/state` or a `/api/capabilities` endpoint.
+- [ ] Define command history polling behavior — periodic poll or on-demand fetch?
 
 ---
 
 ## Phase 4: Student UI
-
-The interface served by the backend service. Defines what students actually see and interact with.
 
 ---
 
@@ -219,22 +220,28 @@ The interface served by the backend service. Defines what students actually see 
 
 - [x] Establish that student UI is served by the backend binary inside the workspace container.
 - [x] Establish that builder mode is a separate binary (Wails app), not a mode of this frontend.
-- [x] Remove ambiguity about whether frontend is SPA vs Wails-embedded vs separately served.
-- [ ] Define the student-facing API surface (routes, REST vs WebSocket).
-- [ ] Define the cluster status panel.
-- [ ] Define the frontend framework.
-- [ ] Define markdown rendering capabilities.
-- [ ] Define authentication.
-- [ ] Define target devices.
-- [ ] Design the LLM help panel component.
-- [ ] Design the non-linear navigation UI (completion matrix vs linear progress bar).
-- [ ] Design the UX distinction between "view step content" (no restart) and "switch workspace" (image swap + restart). Critical for free/guided navigation modes.
+- [x] Establish that student UI has no lifecycle controls — no step transitions, no resets.
+- [x] Define the frontend framework — Svelte 5 + Vite, static assets embedded in Go binary via `//go:embed`.
+- [x] Define styling — Tailwind CSS, desktop-first, responsive breakpoints for tablet/mobile.
+- [x] Define markdown rendering — markdown-it + highlight.js + Mermaid.js + plugins (task lists, admonitions, heading anchors).
+- [x] Define authentication — none in Docker mode; OAuth2 Proxy + Authentik in cluster mode.
+- [x] Define target devices — desktop-first; tablet and mobile supported.
+- [x] Define the student-facing API surface (REST endpoints + WebSocket).
+- [x] Define terminal embed — ttyd in an `<iframe>`, no xterm.js.
+- [x] Define cluster status indicator — small colored button (green/red), shown when backend reports cluster mode enabled.
+- [x] Define step management link — always shown in local mode (CLI always provides URL); conditional in cluster mode.
+- [x] Define validation locking — completed steps show a static indicator; Validate button hidden to prevent false failures after step transitions.
+- [x] Define `step_viewed` logging for timestamp-based command correlation.
+- [x] Define LLM help as step-scoped — `POST /api/steps/:id/llm/help`.
+- [x] Define UX distinction between view step content (no restart) and switch workspace (image swap + restart) — student UI is view-only.
+- [ ] Design the LLM help panel component (layout, streaming render, history display).
+- [ ] Design the non-linear navigation UI (step list sidebar, completion indicators, group display).
+- [ ] Define command history display — shown in UI or LLM-only context?
+- [ ] Define session recordings UI — how does the student access and play recordings?
 
 ---
 
 ## Phase 5: CLI — Local Mode
-
-Focus on the local mode command surface. Cluster-specific CLI work (batch provisioning, K8s auth) is deferred to Phase 8.
 
 ---
 
@@ -243,6 +250,10 @@ Focus on the local mode command surface. Cluster-specific CLI work (batch provis
 - [x] Update Local Mode flow (step image pull + run, not Compose).
 - [x] Update Cluster Mode (CRD generation uses image tags).
 - [x] Add full "Build Commands" section (proxy, compile, step save/new, status).
+- [x] Establish CLI as required entry point for local mode — bare `docker run` not supported.
+- [x] Document pre-flight `workshop.json` read from image (`docker run --rm <image> cat /workshop/workshop.json`) before starting any infrastructure.
+- [ ] Document `extraContainers` lifecycle — start before workspace container, stop after, handle step transitions (which containers get replaced vs kept).
+- [ ] Document port auto-assignment for `extraContainers` — how host ports are selected, how mappings are surfaced in the management UI.
 - [ ] Define the full CLI command tree — focus on local mode first (`workshop run`, `workspace reset`, `workspace list`).
 - [ ] Define CLI configuration model (config file, env vars, registry credentials).
 - [ ] Define error handling strategy — validation errors, image pull failures, partial states.
@@ -252,8 +263,6 @@ Focus on the local mode command surface. Cluster-specific CLI work (batch provis
 ---
 
 ## Phase 6: Builder GUI
-
-The Wails desktop app for authors. Logically part of the single-user authoring loop.
 
 ---
 
@@ -276,27 +285,22 @@ The Wails desktop app for authors. Logically part of the single-user authoring l
 
 ## Phase 7: Domain Model & API Surface (Cluster Mode Prerequisite)
 
-Before building cluster mode, lock down the Go types and Kubernetes API objects.
-
 ---
 
 ### 10. Shared Go Library (`platform/shared-go-library.md`)
-
-This is the glue. Every component imports it.
 
 - [x] Replace Compose parser with step-spec parser (`pkg/stepspec`).
 - [x] Remove `pkg/translate` (no Compose-to-K8s translation needed).
 - [x] Document CRD generation responsibility (workspace metadata + image tags → CRD objects).
 - [ ] Define the Go package layout (`pkg/stepspec`, `pkg/workspace`, `pkg/crd`, `pkg/capability`, `pkg/types`).
 - [ ] Add packages for new features: `pkg/commandlog`, `pkg/recording`, `pkg/instructor`, `pkg/llm`, `pkg/state`.
+- [ ] Add `pkg/infrastructure` — parsing and validation for the `infrastructure` block (cluster, extraContainers).
 - [ ] Define testing approach — unit tests for validation, integration tests for CRD generation, golden file tests.
 - [ ] Define how this library is versioned relative to CRD versions and CLI releases.
 
 ---
 
 ### 11. CRDs (`platform/crds.md`)
-
-The Kubernetes API contract. Encodes workspace metadata and step image references.
 
 - [x] Replace `workload.*` fields with `steps[].imageTag`, `steps[].imageDigest`, `imagePullSecrets`.
 - [x] Remove manifest bundle and file archive references.
@@ -306,6 +310,7 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 - [ ] Define CRD versioning strategy (v1alpha1 → v1beta1 → v1) and conversion webhook requirements.
 - [ ] Define admission webhook validation rules.
 - [ ] Define which roles can create/read/update/delete Templates vs Instances.
+- [ ] Define how `infrastructure.extraContainers` from workshop.json maps to pod spec (sidecars vs separate pods).
 
 ---
 
@@ -392,15 +397,21 @@ The Kubernetes API contract. Encodes workspace metadata and step image reference
 | A | Base Images + Instrumentation | base-images, instrumentation | Complete |
 | B | Instructor Monitoring + LLM | instructor-dashboard, llm-help | Complete |
 | C | Aggregation (K8s) | aggregation | Complete |
-| 3 | Backend Runtime | backend-service | **Blocked** — step transition mechanism in Docker mode undefined; nav vs image swap API ambiguous |
-| 4 | Student UI | frontend | Needs design |
-| 5 | CLI — Local Mode | cli (local) | **Blocked** — SQLite refs removed but step transition mechanism undefined |
+| 3 | Backend Runtime | backend-service | Mostly complete — capability flag + cluster health endpoint TBD |
+| 4 | Student UI | frontend | Core decisions complete — LLM panel + nav UI design TBD |
+| 5 | CLI — Local Mode | cli (local) | Partially complete — extraContainers lifecycle + port mapping + command tree TBD |
 | 6 | Builder GUI | gui | Needs design |
-| **—** | **Single-User Milestone** | | Decisions resolved — ready to implement |
-| 7 | Domain Model & API | shared-go-library, crds | Partially done (SQLite refs cleaned up) |
+| **—** | **Single-User Milestone** | | Unblocked — ready to proceed once open items above closed |
+| 7 | Domain Model & API | shared-go-library, crds | Partially done — `pkg/infrastructure` needed |
 | 8 | Cluster Mode | operator, cli (cluster), provisioners, backend-capabilities | Partially done |
 | 9 | Finalize | overview | Mostly done |
 
-**Critical path:** Resolve the step transition mechanism (Phase 3/5 blocker) and navigation vs image swap distinction (Phase 3/4 blocker) before continuing. These are cross-cutting decisions that affect backend, CLI, frontend, and workshop spec.
-
-Work top to bottom through Phase 6, then validate the single-user mode end-to-end before continuing.
+**Remaining open items before single-user milestone:**
+- Backend: cluster health signal + LLM capability flag in `/api/state` or `/api/capabilities`
+- Backend: command history poll vs on-demand
+- CLI: `extraContainers` lifecycle across step transitions
+- CLI: port auto-assignment and display in management UI
+- CLI: full command tree (`workshop run`, `workspace reset`, etc.)
+- Frontend: LLM help panel component design
+- Frontend: step navigation sidebar + completion UI design
+- Frontend: recordings UI

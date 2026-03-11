@@ -41,7 +41,7 @@ The build pipeline compiles author-facing YAML into JSON for the baked `/worksho
 - **No diffs.** Each step image contains complete cumulative state.
 - **No patch chains.** No step depends on a previous step at runtime — the image is the state.
 - **No separate metadata artifact.** Workshop metadata is baked into the image, not distributed separately.
-- **Self-contained.** `docker run -p 8080:8080 <image>` — no CLI, no config files, no database.
+- **Self-contained.** The image contains everything needed to run the workshop — no separate config files or database. The CLI is the required entry point to start it.
 - **Deterministic.** Building from the same workshop source produces the same image content (modulo base image changes).
 - **Incrementally cacheable.** Dagger layer caching skips unchanged steps automatically.
 
@@ -123,6 +123,25 @@ The pipeline compiles the author's YAML source files into JSON artifacts for the
   "name": "explore-kubernetes",
   "image": "myorg/explore-kubernetes",
   "navigation": "free",
+  "infrastructure": {
+    "cluster": {
+      "enabled": true,
+      "provider": "k3d"
+    },
+    "extraContainers": [
+      {
+        "name": "app",
+        "image": "myorg/sample-app:latest",
+        "ports": [{"port": 3000, "description": "App server"}]
+      },
+      {
+        "name": "db",
+        "image": "postgres:16",
+        "ports": [{"port": 5432, "description": "Postgres"}],
+        "env": {"POSTGRES_PASSWORD": "workshop"}
+      }
+    ]
+  },
   "steps": [
     {"id": "step-pods", "title": "Working with Pods", "group": "basics", "position": 0},
     {"id": "step-services", "title": "Services & Networking", "group": "basics", "position": 1},
@@ -131,6 +150,8 @@ The pipeline compiles the author's YAML source files into JSON artifacts for the
   ]
 }
 ```
+
+The `infrastructure` block is compiled from `workshop.yaml` and included in `workshop.json` so that the CLI can determine what to provision by reading the image alone — no source `workshop.yaml` needed at runtime.
 
 **Each `step.yaml` + convention files → `/workshop/steps/<id>/meta.json`**:
 ```json

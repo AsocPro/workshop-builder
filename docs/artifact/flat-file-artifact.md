@@ -11,10 +11,9 @@ There is no SQLite database, no separate distribution artifact, and no external 
 ## Why Flat Files
 
 - **No separate artifact to manage** — the image is the complete package
-- **`docker run` just works** — no CLI, no config mount, no database delivery
+- **Simple backend** — read files from disk, no database driver or query layer
 - **Human-inspectable** — inspect with `cat`, `ls`, standard tooling
 - **OCI layer efficiency** — metadata directory is one layer shared across all step images
-- **Simple backend** — read files from disk, no database driver or query layer
 - **Non-linear navigation** — all steps' metadata available in every image
 
 ## Why JSON (Not YAML)
@@ -77,6 +76,25 @@ The top-level workshop identity and step manifest.
   "name": "explore-kubernetes",
   "image": "myorg/explore-kubernetes",
   "navigation": "free",
+  "infrastructure": {
+    "cluster": {
+      "enabled": true,
+      "provider": "k3d"
+    },
+    "extraContainers": [
+      {
+        "name": "app",
+        "image": "myorg/sample-app:latest",
+        "ports": [{"port": 3000, "description": "App server"}]
+      },
+      {
+        "name": "db",
+        "image": "postgres:16",
+        "ports": [{"port": 5432, "description": "Postgres"}],
+        "env": {"POSTGRES_PASSWORD": "workshop"}
+      }
+    ]
+  },
   "steps": [
     {
       "id": "step-pods",
@@ -106,12 +124,29 @@ The top-level workshop identity and step manifest.
 | `name` | string | Yes | Workshop identifier |
 | `image` | string | Yes | Image name used for tag generation |
 | `navigation` | string | Yes | `linear`, `free`, or `guided` |
+| `infrastructure` | object | No | Infrastructure requirements the CLI must provision before starting the workspace |
+| `infrastructure.cluster` | object | No | Cluster configuration. Absent means no cluster needed. |
+| `infrastructure.cluster.enabled` | boolean | Yes | Whether to provision a cluster |
+| `infrastructure.cluster.provider` | string | Yes | Cluster provider — `k3d` or `vcluster` |
+| `infrastructure.extraContainers` | array | No | Additional containers to run alongside the workspace (databases, services, etc.) |
+| `infrastructure.extraContainers[].name` | string | Yes | Container name |
+| `infrastructure.extraContainers[].image` | string | Yes | OCI image reference |
+| `infrastructure.extraContainers[].ports` | array | No | Ports to expose from this container |
+| `infrastructure.extraContainers[].ports[].port` | number | Yes | Container port |
+| `infrastructure.extraContainers[].ports[].description` | string | No | Label shown in the management UI |
+| `infrastructure.extraContainers[].env` | object | No | Environment variables to inject |
 | `steps` | array | Yes | Ordered list of step references |
 | `steps[].id` | string | Yes | Step identifier (matches directory name under `steps/`) |
 | `steps[].title` | string | Yes | Display title |
 | `steps[].group` | string | No | Group name for guided navigation |
 | `steps[].requires` | array | No | Prerequisite step IDs |
 | `steps[].position` | number | Yes | Display order (0-indexed) |
+
+`workshop.json` is the complete runtime specification for the workshop — including any infrastructure the CLI needs to provision. There is no separate manifest artifact. The CLI reads this file from the first step's image before starting the workspace, so it knows what to set up before any container is running:
+
+```bash
+docker run --rm myorg/kubernetes-101:step-1-intro cat /workshop/workshop.json
+```
 
 LLM provider configuration (provider, model, API key, max tokens, default mode) is not baked into the image — it is an operator concern configured in the [WorkspaceTemplate CRD](../platform/crds.md) and injected at runtime.
 
@@ -198,10 +233,10 @@ Append-only NDJSON file written by the backend on state transitions. State is ma
 
 ```jsonl
 {"ts":"2025-03-15T14:20:00.000Z","event":"connected"}
-{"ts":"2025-03-15T14:20:01.000Z","event":"step_start","step":"step-pods"}
+{"ts":"2025-03-15T14:20:01.000Z","event":"step_viewed","step":"step-pods"}
 {"ts":"2025-03-15T14:25:00.000Z","event":"goss_result","step":"step-pods","passed":false,"checks":{"total":5,"passed":2}}
 {"ts":"2025-03-15T14:28:00.000Z","event":"goss_result","step":"step-pods","passed":true,"checks":{"total":5,"passed":5}}
-{"ts":"2025-03-15T14:28:01.000Z","event":"step_start","step":"step-services"}
+{"ts":"2025-03-15T14:28:01.000Z","event":"step_viewed","step":"step-services"}
 {"ts":"2025-03-15T14:45:00.000Z","event":"disconnected"}
 ```
 
@@ -211,6 +246,7 @@ Event types:
 |---|---|---|
 | `connected` | — | Browser WebSocket connected |
 | `disconnected` | — | Browser WebSocket disconnected |
+| `step_viewed` | `step` | Student fetched a step's content; used for timestamp-based command correlation |
 | `goss_result` | `step`, `passed`, `checks` | Validation result (student-triggered) |
 
 ### session-&lt;timestamp&gt;.cast
@@ -232,15 +268,9 @@ There is no `state.json` file. State is maintained in-memory by the backend and 
 There is no separate distribution artifact. A workshop is fully portable with:
 
 1. Access to the container registry where images are pushed
-2. That's it.
+2. The CLI installed on the student's machine (for local mode) or a provisioned workspace (for cluster mode)
 
-```bash
-# Run a workshop — no CLI, no config, no database
-docker run -p 8080:8080 myorg/kubernetes-101:step-1-intro
-
-# With LLM help enabled
-docker run -p 8080:8080 -e WORKSHOP_LLM_API_KEY=sk-... myorg/kubernetes-101:step-1-intro
-```
+The CLI is the required entry point — bare `docker run` is not a supported path. When starting a workshop, the CLI pulls the first step image, reads `/workshop/workshop.json` from it, and uses the `infrastructure` field to determine what needs to be provisioned (k3d cluster, etc.) before starting the workspace container. Everything the CLI needs to orchestrate the environment is in the image — no source `workshop.yaml` required at runtime.
 
 ## Size Expectations
 

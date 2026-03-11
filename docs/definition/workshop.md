@@ -11,6 +11,7 @@ Authors write these files, commit them to Git, and hand them to the build pipeli
 - Workshop identity and base image reference (`workshop.yaml`)
 - Navigation mode (`linear`, `free`, or `guided`)
 - Ordered step list (`workshop.yaml`)
+- Infrastructure requirements — cluster provisioning, extra containers, port exposure (`workshop.yaml`)
 - Workshop-level LLM system prompt overrides (`prompts/`)
 - Per-step build recipe — files, env, commands (`steps/<id>/step.yaml`)
 - Per-step tutorial markdown (`steps/<id>/content.md`)
@@ -23,7 +24,6 @@ Authors write these files, commit them to Git, and hand them to the build pipeli
 
 - TTL or lifecycle mode
 - Isolation or team semantics
-- Cluster provisioning config
 - Quotas or resource classes
 - Access surface configuration
 - LLM provider configuration (provider, model, API key)
@@ -104,13 +104,13 @@ Splitting the definition into per-step directories:
 
 ## The Workshop Is a Container Image
 
-There is no separate distribution artifact. All metadata — step definitions, markdown, goss specs, LLM config — is baked into the image as flat files under `/workshop/`. A workshop runs with just:
+There is no separate distribution artifact. All metadata — step definitions, markdown, goss specs, LLM config, infrastructure requirements — is baked into the image as flat files under `/workshop/`. The CLI reads `workshop.json` from the first step's image to determine what infrastructure to provision before starting the workspace:
 
 ```bash
-docker run -p 8080:8080 myorg/kubernetes-101:step-1-intro
+docker run --rm myorg/kubernetes-101:step-1-intro cat /workshop/workshop.json
 ```
 
-No CLI required, no SQLite, no external configuration. The [compilation pipeline](../artifact/compilation.md) transforms the workshop directory into images built on top of [base images](../platform/base-images.md) that include all platform tooling.
+The [compilation pipeline](../artifact/compilation.md) transforms the workshop directory into images built on top of [base images](../platform/base-images.md) that include all platform tooling. The CLI is the required entry point — it handles cluster provisioning, extra containers, port mapping, and the management server.
 
 Every step image contains ALL steps' metadata (tutorial content, goss specs, LLM config). Only the `/workspace/` content differs per step. This enables:
 - Validating any step at any time (non-linear navigation)
@@ -158,6 +158,19 @@ base:
   # OR
   containerFile: <path>              # path to a Containerfile/Dockerfile (relative to workshop.yaml)
 
+infrastructure:                      # optional — omit if no extra infrastructure needed
+  cluster:
+    enabled: true
+    provider: <k3d|vcluster>
+  extraContainers:
+    - name: <container-name>
+      image: <image-reference>
+      ports:
+        - port: <number>
+          description: <label>       # shown in management UI
+      env:
+        KEY: value
+
 steps:
   - <step-id>                        # references steps/<step-id>/ directory
   - <step-id>
@@ -174,6 +187,16 @@ steps:
 | `workshop.navigation` | string | No | Navigation mode: `linear` (default), `free`, or `guided` |
 | `base.image` | string | No | Starting image for step 1 build (e.g. `workshop-base:ubuntu`) |
 | `base.containerFile` | string | No | Path to a Containerfile/Dockerfile for building the base layer (relative to `workshop.yaml`) |
+| `infrastructure` | object | No | Infrastructure the CLI must provision before starting the workspace. Omit entirely if no extra infrastructure is needed. |
+| `infrastructure.cluster.enabled` | boolean | No | Whether to provision a cluster alongside the workspace |
+| `infrastructure.cluster.provider` | string | No | Cluster provider: `k3d` or `vcluster` |
+| `infrastructure.extraContainers` | list | No | Additional containers to run alongside the workspace (databases, services, etc.) |
+| `infrastructure.extraContainers[].name` | string | Yes | Container name |
+| `infrastructure.extraContainers[].image` | string | Yes | OCI image reference |
+| `infrastructure.extraContainers[].ports` | list | No | Ports to expose from this container; CLI maps to available host ports |
+| `infrastructure.extraContainers[].ports[].port` | number | Yes | Container port number |
+| `infrastructure.extraContainers[].ports[].description` | string | No | Label shown in the management UI |
+| `infrastructure.extraContainers[].env` | map | No | Environment variables to inject into this container |
 | `steps` | list | Yes | Ordered list of step IDs; each must match a directory under `steps/` |
 
 `base.image` and `base.containerFile` are mutually exclusive — specify one or the other, not both. Exactly one must be present.
@@ -406,6 +429,16 @@ The [Shared Go Library](../platform/shared-go-library.md) validates the workshop
 | A step ID is listed but has no `steps/<id>/` directory | `steps[<n>]: directory not found: steps/<id>/` |
 | A step ID contains invalid characters (not URL-safe) | `steps[<n>]: must be lowercase alphanumeric and hyphens only` |
 | A step ID is duplicated | `steps[<n>]: "<id>" is already used at position <m>` |
+
+### Infrastructure Validation
+
+| Rule | Error Message |
+|---|---|
+| `infrastructure.cluster.enabled` is true but `provider` is missing | `infrastructure.cluster.provider: required when enabled is true` |
+| `infrastructure.cluster.provider` is not `k3d` or `vcluster` | `infrastructure.cluster.provider: must be one of: k3d, vcluster` |
+| An `extraContainers` entry has no `name` | `infrastructure.extraContainers[<n>]: name is required` |
+| An `extraContainers` entry has no `image` | `infrastructure.extraContainers[<n>]: image is required` |
+| Two `extraContainers` entries share the same `name` | `infrastructure.extraContainers[<n>]: name "<name>" is already used` |
 
 ### Step Validation (`steps/<id>/`)
 
@@ -743,6 +776,66 @@ commands:
 ```
 
 When using a custom base image (not a `workshop-base:*` image), the author must install the required platform components manually. See [Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements) for details.
+
+### Workshop with Extra Infrastructure
+
+A web application workshop that needs a database sidecar and exposes the app port.
+
+**`workshop.yaml`**:
+```yaml
+version: v1
+
+workshop:
+  name: web-app-workshop
+  image: myorg/web-app-workshop
+
+base:
+  image: workshop-base:ubuntu
+
+infrastructure:
+  extraContainers:
+    - name: db
+      image: postgres:16
+      ports:
+        - port: 5432
+          description: Postgres
+      env:
+        POSTGRES_PASSWORD: workshop
+        POSTGRES_DB: app
+    - name: app
+      image: myorg/sample-app:latest
+      ports:
+        - port: 3000
+          description: App server
+
+steps:
+  - step-1-setup
+  - step-2-connect
+```
+
+A Kubernetes workshop that provisions a local cluster:
+
+**`workshop.yaml`**:
+```yaml
+version: v1
+
+workshop:
+  name: kubernetes-101
+  image: myorg/kubernetes-101
+
+base:
+  image: workshop-base:ubuntu
+
+infrastructure:
+  cluster:
+    enabled: true
+    provider: k3d
+
+steps:
+  - step-pods
+  - step-services
+  - step-rbac
+```
 
 ### Draft Steps
 

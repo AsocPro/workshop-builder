@@ -8,16 +8,17 @@ Primary control surface for the platform. Handles workspace orchestration across
 
 ### Local Mode
 
-Single-user execution using Docker as the backend.
+Single-user execution using Docker as the backend. **The CLI is required** — bare `docker run` is not a supported path. This keeps the experience consistent: multi-container workshops need orchestration, k8s workshops need k3d provisioning, and all workshops need the management server for step transitions. Requiring the CLI eliminates all of that conditional complexity.
 
 1. Read `workshop.yaml`
 2. Validate via [Shared Go Library](./shared-go-library.md)
 3. Resolve step image tags from `workshop.yaml` (image name + step ID)
 4. Pull step image from registry
-5. Run container from step image (`docker run`)
-6. Backend service inside container handles terminal and UI
-7. Provision nested cluster if required (k3d)
-8. Manage workspace lifecycle locally
+5. Start local management server (see below)
+6. Run container from step image (`docker run`), injecting `WORKSHOP_MANAGEMENT_URL`
+7. Backend service inside container handles terminal and UI
+8. Provision nested cluster if required (k3d)
+9. Manage workspace lifecycle locally
 
 Step transitions in local mode: stop current container → pull next step image → start new container. No manifest bundles, no PVC operations.
 

@@ -22,7 +22,7 @@ tini (as PID 1) handles zombie process reaping and clean signal forwarding. The 
 tini (PID 1)
   └── workshop-backend (PID 2)
         ├── Read /workshop/workshop.json + /workshop/steps/*  (flat file metadata)
-        ├── Read WORKSHOP_MANAGEMENT_URL env var (optional — link shown in UI if set)
+        ├── Read WORKSHOP_MANAGEMENT_URL env var (always set in local mode; may be set in cluster mode)
         ├── Create /workshop/runtime/ directory
         ├── Initialize in-memory state (fresh — no replay)
         ├── Spawn ttyd → asciinema rec → /bin/bash  (terminal + recording)
@@ -48,8 +48,11 @@ No database, no schema migration, no working copy. The files are baked into the 
 The backend maintains in-memory state and appends events to `/workshop/runtime/state-events.jsonl` as they occur. State is **not** replayed on startup — the backend always starts fresh.
 
 Events written:
+- `step_viewed` — student fetched a step's content (`GET /api/steps/:id/content`); includes step ID and timestamp
 - `goss_result` — validation executed (student-triggered)
 - `connected` / `disconnected` — WebSocket connect/disconnect
+
+`step_viewed` events make it possible to correlate command history to the step the student was viewing at the time. The command log has independent timestamps; by finding the `step_viewed` event immediately before a command's timestamp, you can reconstruct which step the student was working on when they ran it. No per-command step attribution is needed — the correlation happens at query time from the two logs.
 
 The event log exists so that in K8s mode, Vector can ship it to Postgres for instructor visibility and analytics. In Docker mode the file accumulates locally but is not read back.
 

@@ -2,13 +2,15 @@
 
 ## What This Is
 
-A Kubernetes-native platform for building and running technical Linux-based workshops. Workshop content is packaged as **tagged OCI images** in a container registry, one per workshop step. Each image is self-contained — all metadata (step definitions, tutorial markdown, goss specs, LLM configuration) is baked in as flat files. A workshop runs with just:
+A Kubernetes-native platform for building and running technical Linux-based workshops. Workshop content is packaged as **tagged OCI images** in a container registry, one per workshop step. Each image is self-contained — all metadata (step definitions, tutorial markdown, goss specs, LLM configuration, infrastructure requirements) is baked in as flat files under `/workshop/`.
+
+The CLI is the required entry point for running workshops. It reads the workshop's runtime specification directly from the image before starting anything:
 
 ```bash
-docker run -p 8080:8080 myorg/kubernetes-101:step-1-intro
+workshop run myorg/kubernetes-101
 ```
 
-No CLI required, no external database, no separate configuration.
+No external database, no separate configuration artifact. The image IS the workshop.
 
 ## Architecture Sections
 
@@ -87,45 +89,51 @@ The student UI is served directly from inside the workspace container by the bac
 3. **Runtime must be simpler than authoring.**
 4. **Reset must be deterministic** — jumping to any step produces identical state.
 5. **Each step is a complete OCI image** — no diffs or patch chains at runtime.
-6. **The container image IS the workshop** — no separate distribution artifact.
-7. **Storage cost is acceptable; operational complexity is not.**
-8. **Feature parity is NOT required across backends** — semantics must be clear.
-9. **The student container is identical in Docker and Kubernetes mode** — aggregation is bolted on via sidecar.
+6. **The container image IS the workshop** — no separate distribution artifact. The CLI reads everything it needs from the image.
+7. **The CLI is the required entry point for local mode** — bare `docker run` is not supported. Consistent orchestration regardless of workshop complexity.
+8. **Storage cost is acceptable; operational complexity is not.**
+9. **Feature parity is NOT required across backends** — semantics must be clear.
+10. **The student container is identical in Docker and Kubernetes mode** — aggregation is bolted on via sidecar.
 
 ## System Flow
 
 ```
 Author creates:
-  workshop.yaml (manifest)
+  workshop.yaml (manifest — steps, navigation, infrastructure requirements)
   steps/<id>/step.yaml + content.md + files/
   (written via CLI proxy or directly)
             │
     workshop build compile
-    (Dagger pipeline — compiles YAML → JSON)
+    (Dagger pipeline — compiles YAML → JSON, builds OCI images)
             │
      OCI images pushed to registry
      (one per step, self-contained)
      Each image contains:
-       - /workshop/ metadata (ALL steps)
-       - /workspace/ content (THIS step)
-       - Platform tooling (backend, goss, asciinema, bashrc)
+       - /workshop/workshop.json  (identity, steps, infrastructure spec)
+       - /workshop/steps/*/       (ALL steps' metadata)
+       - /workspace/...           (THIS step's content files)
+       - Platform tooling         (backend, goss, asciinema, bashrc)
             │
             │
-   ┌────────┴──────────────────┐
-   │                           │
- Local mode                 Cluster mode
- (docker run step image)    (WorkspaceTemplate + WorkspaceInstance CRDs)
-   │                           │
- Backend starts:            Operator reconciles:
-   - reads /workshop/*        - provisions namespace
-   - reads /workshop/*        - deploys step image with Vector sidecar
-   - spawns ttyd+asciinema    - manages lifecycle
-   - serves student web UI    - step transitions via image swap
-   - writes JSONL files           │
-                               Backend starts (same image, same behavior)
-                                 - writes JSONL files
-                                 - Vector sidecar ships to Postgres/S3
-                                 - Instructor dashboard aggregates
+   ┌────────┴──────────────────────┐
+   │                               │
+ Local mode                   Cluster mode
+ (workshop run — CLI required)  (WorkspaceTemplate + WorkspaceInstance CRDs)
+   │                               │
+ CLI reads workshop.json        Operator reconciles:
+   from first step image          - provisions namespace
+ CLI provisions infrastructure:  - deploys step image with Vector sidecar
+   - k3d cluster (if needed)     - manages lifecycle
+   - extraContainers              - step transitions via image swap
+   - port mappings                    │
+ CLI starts management server   Backend starts (same image, same behavior)
+ CLI runs workspace container     - reads /workshop/*
+   │                               - spawns ttyd+asciinema
+ Backend starts:                  - serves student web UI
+   - reads /workshop/*             - writes JSONL files
+   - spawns ttyd+asciinema         - Vector sidecar ships to Postgres/S3
+   - serves student web UI         - Instructor dashboard aggregates
+   - writes JSONL files
 ```
 
 ## Image Layer Structure
@@ -159,9 +167,20 @@ myorg/kubernetes-101:step-1-intro
 - A system that stores metadata in SQLite
 - A system with a separate distribution artifact
 - A system with an author-facing file for deployment/operator configuration
+- A system where workshops can be run with bare `docker run` — the CLI is always required
 
 ## Open Architectural Questions
 
 The following questions must be resolved before implementation. They are tracked as TODOs in the relevant docs:
 
-1. **LLM API key distribution for Docker mode.** The student runs `docker run -e WORKSHOP_LLM_API_KEY=...`. Who provides the key? Is this an instructor responsibility? See [LLM Help](./platform/llm-help.md).
+1. **LLM API key distribution for Docker mode.** Who provides the key when a student runs a workshop locally? Is this an instructor responsibility? See [LLM Help](./platform/llm-help.md).
+
+2. **LLM capability flag and cluster health signal.** How does the frontend know whether LLM help is configured and whether cluster mode is enabled? Should `/api/state` include a capabilities object, or is a separate `/api/capabilities` endpoint cleaner? See [Backend Service](./platform/backend-service.md) and [Frontend](./presentation/frontend.md).
+
+3. **`extraContainers` lifecycle across step transitions.** When a student transitions to a new step, which extra containers are replaced alongside the workspace container and which persist? See [CLI](./platform/cli.md).
+
+4. **Port auto-assignment for `extraContainers`.** The CLI maps container ports to available host ports at startup. How are these mappings surfaced to the student (management UI, stdout, env vars injected into workspace)? See [CLI](./platform/cli.md).
+
+5. **Command history display.** Is the command history visible in the student UI, or is it only used as LLM context? If shown, is it polled periodically or fetched on demand? See [Frontend](./presentation/frontend.md).
+
+6. **`extraContainers` in cluster mode.** How does the `infrastructure.extraContainers` block from `workshop.json` map to Kubernetes — sidecars in the workspace pod, or separate pods? See [CRDs](./platform/crds.md) and [Operator](./platform/operator.md).
