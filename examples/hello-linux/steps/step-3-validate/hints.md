@@ -1,0 +1,3 @@
+- The command `echo text > file` writes text to a file
+- Use `>` to overwrite, `>>` to append
+- Try: `echo validated > /workspace/done.txt`

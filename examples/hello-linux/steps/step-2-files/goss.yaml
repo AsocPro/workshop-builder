@@ -1,0 +1,4 @@
+file:
+  /workspace/hello.sh:
+    exists: true
+    mode: "0755"

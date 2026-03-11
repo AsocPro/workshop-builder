@@ -1,0 +1,7 @@
+title: "Working with Files"
+files:
+  - source: hello.sh
+    target: /workspace/hello.sh
+    mode: "0755"
+commands:
+  - chmod +x /workspace/hello.sh

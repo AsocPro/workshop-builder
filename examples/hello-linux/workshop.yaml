@@ -1,0 +1,14 @@
+version: v1
+
+workshop:
+  name: hello-linux
+  image: localhost/hello-linux
+  navigation: linear
+
+base:
+  image: workshop-base:ubuntu
+
+steps:
+  - step-1-intro
+  - step-2-files
+  - step-3-validate

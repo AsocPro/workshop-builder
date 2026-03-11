@@ -1,0 +1,3 @@
+- Look at the terminal pane below the tutorial content
+- Try typing `ls /workspace` to see what files exist
+- Use `pwd` to check your current directory
