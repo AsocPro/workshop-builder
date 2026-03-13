@@ -342,6 +342,25 @@ func (m *WorkshopBuilder) RunBackend(
 
 // ── Dev ───────────────────────────────────────────────────────────────────────
 
+// viteDevContainer builds a node container with deps installed, ready to run
+// the Vite dev server. Deps are cached on package.json + lock only — source
+// changes don't invalidate npm ci, so restarts skip the install step entirely.
+// node_modules never appear on the host.
+func (m *WorkshopBuilder) viteDevContainer(frontend *dagger.Directory) *dagger.Container {
+	withDeps := dag.Container().
+		From("node:22-alpine").
+		WithMountedCache("/root/.npm", dag.CacheVolume("npm-cache")).
+		WithFile("/app/package.json", frontend.File("package.json")).
+		WithFile("/app/package-lock.json", frontend.File("package-lock.json")).
+		WithWorkdir("/app").
+		WithExec([]string{"npm", "ci"})
+
+	// Overlay full source on top — node_modules from the step above are preserved
+	return withDeps.WithDirectory("/app", frontend)
+}
+
+// ── Dev ───────────────────────────────────────────────────────────────────────
+
 // Dev starts the backend and frontend dev server together, wired via service binding.
 // Usage: dagger call dev --image ./dist/step-1-intro.tar up --ports 5173:5173
 func (m *WorkshopBuilder) Dev(
@@ -355,12 +374,8 @@ func (m *WorkshopBuilder) Dev(
 ) *dagger.Service {
 	backend := m.RunBackend(image, managementURL)
 
-	return dag.Container().
-		From("node:22-alpine").
+	return m.viteDevContainer(frontend).
 		WithServiceBinding("backend", backend).
-		WithDirectory("/app", frontend).
-		WithWorkdir("/app").
-		WithExec([]string{"npm", "ci"}).
 		WithEnvVariable("BACKEND_URL", "http://backend:8080").
 		WithExposedPort(5173).
 		AsService(dagger.ContainerAsServiceOpts{
@@ -397,21 +412,17 @@ func (m *WorkshopBuilder) DevExample(
 
 // ── DevFrontend ───────────────────────────────────────────────────────────────
 
-// DevFrontend starts a Vite dev server with the frontend directory mounted.
-// Use Dev instead to also start the backend. This variant is useful when the
-// backend is already running and reachable at backendURL.
+// DevFrontend starts a Vite dev server pointing at an existing backend URL.
+// Useful when the backend is already running (e.g. podman run -p 8080:8080 ...).
+// Usage: dagger call dev-frontend --backend-url http://localhost:8080 up --ports 5173:5173
 func (m *WorkshopBuilder) DevFrontend(
 	ctx context.Context,
 	// +defaultPath="/frontend"
 	frontend *dagger.Directory,
-	// URL of the backend to proxy API requests to
+	// URL of the already-running backend
 	backendURL string,
 ) *dagger.Service {
-	return dag.Container().
-		From("node:22-alpine").
-		WithDirectory("/app", frontend).
-		WithWorkdir("/app").
-		WithExec([]string{"npm", "ci"}).
+	return m.viteDevContainer(frontend).
 		WithEnvVariable("BACKEND_URL", backendURL).
 		WithExposedPort(5173).
 		AsService(dagger.ContainerAsServiceOpts{
