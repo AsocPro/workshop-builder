@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/asocpro/workshop-builder/backend/process"
 	"github.com/asocpro/workshop-builder/backend/store"
@@ -29,6 +30,12 @@ func main() {
 
 	// Initialize in-memory state
 	st := store.NewState(meta)
+
+	// Ensure runtime dir exists for state events
+	runtimeDir := filepath.Join(workshopRoot, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		log.Printf("warning: could not create runtime dir: %v", err)
+	}
 
 	// Spawn ttyd (terminal)
 	ttydMgr := process.NewTTYDManager(7681)

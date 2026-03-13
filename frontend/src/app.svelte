@@ -34,6 +34,16 @@
     steps = await api.listSteps()
   }
 
+  const hasNext = $derived(
+    steps.slice(steps.findIndex(s => s.id === activeStepId) + 1).some(s => s.accessible)
+  )
+
+  async function onContinue() {
+    const idx = steps.findIndex(s => s.id === activeStepId)
+    const next = steps.slice(idx + 1).find(s => s.accessible)
+    if (next) await onNavigate(next.id)
+  }
+
   onMount(loadInitialState)
 </script>
 
@@ -72,6 +82,8 @@
         stepId={activeStepId}
         step={steps.find(s => s.id === activeStepId) ?? null}
         onValidated={onValidated}
+        onContinue={onContinue}
+        hasNext={hasNext}
       />
     {:else}
       <div class="p-8 text-gray-500">Select a step to begin.</div>
