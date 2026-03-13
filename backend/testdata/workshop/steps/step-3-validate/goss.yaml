@@ -1,0 +1,5 @@
+file:
+  /workspace/done.txt:
+    exists: true
+    contains:
+      - "validated"

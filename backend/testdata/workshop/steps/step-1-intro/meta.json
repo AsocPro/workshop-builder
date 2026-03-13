@@ -1,0 +1,10 @@
+{
+  "id": "step-1-intro",
+  "title": "Welcome to Hello Linux",
+  "position": 0,
+  "hasGoss": false,
+  "hasLlm": false,
+  "hasHints": true,
+  "hasExplain": false,
+  "hasSolve": false
+}

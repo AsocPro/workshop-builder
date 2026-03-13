@@ -1,0 +1,10 @@
+{
+  "id": "step-3-validate",
+  "title": "Validation and Completion",
+  "position": 2,
+  "hasGoss": true,
+  "hasLlm": false,
+  "hasHints": true,
+  "hasExplain": false,
+  "hasSolve": true
+}

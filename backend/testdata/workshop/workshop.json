@@ -1,0 +1,10 @@
+{
+  "name": "hello-linux",
+  "image": "localhost/hello-linux",
+  "navigation": "linear",
+  "steps": [
+    {"id": "step-1-intro", "title": "Welcome to Hello Linux", "position": 0},
+    {"id": "step-2-files", "title": "Working with Files", "position": 1},
+    {"id": "step-3-validate", "title": "Validation and Completion", "position": 2}
+  ]
+}

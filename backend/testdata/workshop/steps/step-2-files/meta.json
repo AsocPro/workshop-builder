@@ -1,0 +1,10 @@
+{
+  "id": "step-2-files",
+  "title": "Working with Files",
+  "position": 1,
+  "hasGoss": true,
+  "hasLlm": false,
+  "hasHints": false,
+  "hasExplain": false,
+  "hasSolve": false
+}
