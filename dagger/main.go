@@ -69,11 +69,161 @@ func (m *WorkshopBuilder) BuildBackend(
 		File("/out/workshop-backend")
 }
 
+// ── BuildBaseImages ───────────────────────────────────────────────────────────
+
+// BuildBaseImages builds workshop-base:{ubuntu,rocky,debian} and returns a
+// directory of OCI tarballs. Load into Podman with:
+//
+//	dagger call build-base-images --src . --output /tmp/base-images
+//	podman load -i /tmp/base-images/ubuntu.tar && podman tag <sha> workshop-base:ubuntu
+func (m *WorkshopBuilder) BuildBaseImages(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+) (*dagger.Directory, error) {
+	backendBin := m.BuildBackend(ctx, src)
+	out := dag.Directory()
+	for _, variant := range []string{"ubuntu", "rocky", "debian"} {
+		img, err := m.buildBaseImage(ctx, src, variant, backendBin)
+		if err != nil {
+			return nil, fmt.Errorf("building %s: %w", variant, err)
+		}
+		out = out.WithFile(variant+".tar", img.AsTarball())
+	}
+	return out, nil
+}
+
+// PublishBaseImages builds all three base images and pushes them to ghcr.io.
+// Requires a GitHub token with write:packages scope.
+//
+//	dagger call publish-base-images --src . --token env:GITHUB_TOKEN
+func (m *WorkshopBuilder) PublishBaseImages(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+	// GitHub token with write:packages scope
+	token *dagger.Secret,
+	// Registry repo prefix (e.g. ghcr.io/asocpro/workshop-base)
+	// +optional
+	// +default="ghcr.io/asocpro/workshop-base"
+	repo string,
+) error {
+	if repo == "" {
+		repo = "ghcr.io/asocpro/workshop-base"
+	}
+	backendBin := m.BuildBackend(ctx, src)
+	for _, variant := range []string{"ubuntu", "rocky", "debian"} {
+		img, err := m.buildBaseImage(ctx, src, variant, backendBin)
+		if err != nil {
+			return fmt.Errorf("building %s: %w", variant, err)
+		}
+		tag := repo + ":" + variant
+		fmt.Printf("Publishing %s\n", tag)
+		if _, err := img.WithRegistryAuth("ghcr.io", "x-access-token", token).Publish(ctx, tag); err != nil {
+			return fmt.Errorf("publishing %s: %w", tag, err)
+		}
+	}
+	return nil
+}
+
+// buildBaseImage builds a single workshop base image variant.
+func (m *WorkshopBuilder) buildBaseImage(
+	ctx context.Context,
+	src *dagger.Directory,
+	variant string,
+	backendBin *dagger.File,
+) (*dagger.Container, error) {
+	tini := m.downloadTini(ctx)
+	goss := m.downloadGoss(ctx)
+	ttyd := m.downloadTtyd(ctx)
+	bashrc := src.File("base-images/bashrc")
+
+	switch variant {
+	case "ubuntu":
+		return m.buildUbuntuBase(bashrc, backendBin, tini, goss, ttyd), nil
+	case "rocky":
+		return m.buildRockyBase(bashrc, backendBin, tini, goss, ttyd), nil
+	case "debian":
+		return m.buildDebianBase(bashrc, backendBin, tini, goss, ttyd), nil
+	default:
+		return nil, fmt.Errorf("unknown base image variant: %s", variant)
+	}
+}
+
+func (m *WorkshopBuilder) buildUbuntuBase(
+	bashrc *dagger.File,
+	backendBin, tini, goss, ttyd *dagger.File,
+) *dagger.Container {
+	return dag.Container().
+		From("ubuntu:24.04").
+		WithExec([]string{
+			"sh", "-c",
+			"apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
+				"bash curl ca-certificates jq && rm -rf /var/lib/apt/lists/*",
+		}).
+		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/etc/workshop-platform.bashrc", bashrc).
+		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
+		WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
+		WithEntrypoint([]string{"/sbin/tini", "--"}).
+		WithDefaultArgs([]string{"/usr/local/bin/workshop-backend"})
+}
+
+func (m *WorkshopBuilder) buildDebianBase(
+	bashrc *dagger.File,
+	backendBin, tini, goss, ttyd *dagger.File,
+) *dagger.Container {
+	return dag.Container().
+		From("debian:bookworm-slim").
+		WithExec([]string{
+			"sh", "-c",
+			"apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
+				"bash curl ca-certificates jq && rm -rf /var/lib/apt/lists/*",
+		}).
+		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/etc/workshop-platform.bashrc", bashrc).
+		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
+		WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
+		WithEntrypoint([]string{"/sbin/tini", "--"}).
+		WithDefaultArgs([]string{"/usr/local/bin/workshop-backend"})
+}
+
+func (m *WorkshopBuilder) buildRockyBase(
+	bashrc *dagger.File,
+	backendBin, tini, goss, ttyd *dagger.File,
+) *dagger.Container {
+	return dag.Container().
+		From("rockylinux:9").
+		WithExec([]string{
+			"sh", "-c",
+			"dnf install -y bash curl ca-certificates jq && dnf clean all",
+		}).
+		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/etc/workshop-platform.bashrc", bashrc).
+		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bashrc`}).
+		WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
+		WithEntrypoint([]string{"/sbin/tini", "--"}).
+		WithDefaultArgs([]string{"/usr/local/bin/workshop-backend"})
+}
+
 // ── BuildWorkshop ─────────────────────────────────────────────────────────────
 
 // BuildWorkshop builds all step OCI images for a workshop.
 // Returns a directory of OCI tarballs: one per step, named "<step-id>.tar".
 // workshopPath is relative to src (e.g. "examples/hello-linux").
+//
+// Known workshop-base variants (workshop-base:{ubuntu,rocky,debian} and their
+// ghcr.io equivalents) are built inline — no local registry required.
+// Custom base images are pulled from the registry via FROM.
 func (m *WorkshopBuilder) BuildWorkshop(
 	ctx context.Context,
 	// +defaultPath="/"
@@ -81,35 +231,57 @@ func (m *WorkshopBuilder) BuildWorkshop(
 	// Path to workshop directory relative to src root (e.g. "examples/hello-linux")
 	workshopPath string,
 ) (*dagger.Directory, error) {
-	// Step 1: Compile workshop metadata via Go container
 	compileOut, err := m.runCompileWorkshop(ctx, src, workshopPath)
 	if err != nil {
 		return nil, fmt.Errorf("compile workshop: %w", err)
 	}
 
-	// Step 2: Build backend binary
+	// Build backend binary (includes embedded frontend)
 	backendBin := m.BuildBackend(ctx, src)
 
-	// Step 3: Download tool binaries
-	tini := m.downloadTini(ctx)
-	goss := m.downloadGoss(ctx)
-	ttyd := m.downloadTtyd(ctx)
+	// Resolve base container for this workshop
+	base, err := m.resolveBaseContainer(ctx, src, compileOut.BaseImage, backendBin)
+	if err != nil {
+		return nil, fmt.Errorf("resolving base %q: %w", compileOut.BaseImage, err)
+	}
 
-	// Step 4: Build step images sequentially, each layering on the previous
+	// Bake /workshop/ metadata (ALL steps) into the base — done once
+	base = m.bakeWorkshopMetadata(ctx, base, src, workshopPath, compileOut)
+
+	// Build step images sequentially, each layering on the previous
 	out := dag.Directory()
-	var prev *dagger.Container
-
+	prev := base
 	for i, step := range compileOut.Steps {
 		fmt.Printf("Building step %d/%d: %s\n", i+1, len(compileOut.Steps), step.ID)
-
-		img := m.buildStepImage(ctx, src, workshopPath, compileOut, step, i, backendBin, tini, goss, ttyd, prev)
-
-		// Add OCI tarball to output directory; caller loads into Podman
+		img := m.buildStepImage(src, workshopPath, step, prev)
 		out = out.WithFile(step.ID+".tar", img.AsTarball())
-
 		prev = img
 	}
 	return out, nil
+}
+
+// resolveBaseContainer returns the base container for a given base image reference.
+// Known workshop-base variants are built inline (no registry pull needed).
+// Other references are pulled from the registry via FROM.
+func (m *WorkshopBuilder) resolveBaseContainer(
+	ctx context.Context,
+	src *dagger.Directory,
+	baseImage string,
+	backendBin *dagger.File,
+) (*dagger.Container, error) {
+	known := map[string]string{
+		"workshop-base:ubuntu":                  "ubuntu",
+		"workshop-base:rocky":                   "rocky",
+		"workshop-base:debian":                  "debian",
+		"ghcr.io/asocpro/workshop-base:ubuntu": "ubuntu",
+		"ghcr.io/asocpro/workshop-base:rocky":  "rocky",
+		"ghcr.io/asocpro/workshop-base:debian": "debian",
+	}
+	if variant, ok := known[baseImage]; ok {
+		return m.buildBaseImage(ctx, src, variant, backendBin)
+	}
+	// Custom base image — pull from registry
+	return dag.Container().From(baseImage), nil
 }
 
 // ── Internal types ────────────────────────────────────────────────────────────
@@ -117,6 +289,7 @@ func (m *WorkshopBuilder) BuildWorkshop(
 type compileOutput struct {
 	WorkshopJSON  string       `json:"workshopJson"`
 	WorkshopImage string       // extracted from workshopJson after parsing
+	BaseImage     string       `json:"baseImage"`
 	Steps         []stepOutput `json:"steps"`
 }
 
@@ -180,60 +353,23 @@ func (m *WorkshopBuilder) runCompileWorkshop(ctx context.Context, src *dagger.Di
 // ── buildStepImage ────────────────────────────────────────────────────────────
 
 func (m *WorkshopBuilder) buildStepImage(
-	ctx context.Context,
 	src *dagger.Directory,
 	workshopPath string,
-	compiled *compileOutput,
 	step stepOutput,
-	position int,
-	backendBin *dagger.File,
-	tini, goss, ttyd *dagger.File,
-	prev *dagger.Container,
+	base *dagger.Container,
 ) *dagger.Container {
-	var ctr *dagger.Container
-
-	if prev == nil {
-		// First step: build the full base layer
-		ctr = dag.Container().From("ubuntu:24.04")
-
-		// Install system dependencies
-		ctr = ctr.WithExec([]string{
-			"sh", "-c",
-			"apt-get update && apt-get install -y --no-install-recommends " +
-				"bash curl ca-certificates jq && rm -rf /var/lib/apt/lists/*",
-		})
-
-		// Install platform binaries
-		ctr = ctr.
-			WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
-			WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
-			WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
-			WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755})
-
-		// Shell instrumentation
-		ctr = ctr.WithNewFile("/etc/workshop-platform.bashrc", bashrcContent())
-		ctr = ctr.WithExec([]string{
-			"sh", "-c",
-			`echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`,
-		})
-
-		// Bake /workshop/ metadata (all steps) — only done once in first image
-		ctr = m.bakeWorkshopMetadata(ctx, ctr, src, workshopPath, compiled)
-
-		// Runtime state directory
-		ctr = ctr.WithExec([]string{"mkdir", "-p", "/workshop/runtime"})
-	} else {
-		ctr = prev
-	}
+	ctr := base
 
 	// Apply this step's file mappings
-	stepSrcDir := src.Directory(workshopPath + "/steps/" + step.ID + "/files")
-	for _, fm := range step.Files {
-		perms := 0644
-		if fm.Mode != "" {
-			fmt.Sscanf(fm.Mode, "%o", &perms)
+	if len(step.Files) > 0 {
+		stepSrcDir := src.Directory(workshopPath + "/steps/" + step.ID + "/files")
+		for _, fm := range step.Files {
+			perms := 0644
+			if fm.Mode != "" {
+				fmt.Sscanf(fm.Mode, "%o", &perms)
+			}
+			ctr = ctr.WithFile(fm.Target, stepSrcDir.File(fm.Source), dagger.ContainerWithFileOpts{Permissions: perms})
 		}
-		ctr = ctr.WithFile(fm.Target, stepSrcDir.File(fm.Source), dagger.ContainerWithFileOpts{Permissions: perms})
 	}
 
 	// Run step setup commands
@@ -299,28 +435,6 @@ func (m *WorkshopBuilder) bakeWorkshopMetadata(
 	return ctr
 }
 
-// ── bashrcContent ─────────────────────────────────────────────────────────────
-
-func bashrcContent() string {
-	return `# Workshop Platform Shell Instrumentation
-
-__workshop_log_command() {
-    local exit_code=$?
-    local cmd
-    cmd=$(history 1 | sed 's/^[ ]*[0-9]*[ ]*//')
-    if [ -n "$cmd" ]; then
-        local ts
-        ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        jq -n --arg ts "$ts" --arg cmd "$cmd" --argjson exit "$exit_code" \
-            '{"ts":$ts,"cmd":$cmd,"exit":$exit}' \
-            >> /workshop/runtime/command-log.jsonl 2>/dev/null || true
-    fi
-}
-
-PROMPT_COMMAND="__workshop_log_command${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
-`
-}
-
 // ── RunBackend ────────────────────────────────────────────────────────────────
 
 // RunBackend starts a workshop step image as a backend service.
@@ -358,8 +472,6 @@ func (m *WorkshopBuilder) viteDevContainer(frontend *dagger.Directory) *dagger.C
 	// Overlay full source on top — node_modules from the step above are preserved
 	return withDeps.WithDirectory("/app", frontend)
 }
-
-// ── Dev ───────────────────────────────────────────────────────────────────────
 
 // Dev starts the backend and frontend dev server together, wired via service binding.
 // Usage: dagger call dev --image ./dist/step-1-intro.tar up --ports 5173:5173
@@ -428,6 +540,72 @@ func (m *WorkshopBuilder) DevFrontend(
 		AsService(dagger.ContainerAsServiceOpts{
 			Args: []string{"npm", "run", "dev", "--", "--host"},
 		})
+}
+
+// ── BuildCLI ──────────────────────────────────────────────────────────────────
+
+// BuildCLI cross-compiles the workshop CLI binary for the host platform.
+// Usage: dagger call build-cli --src . -o ./workshop && chmod +x ./workshop
+func (m *WorkshopBuilder) BuildCLI(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+	// Target OS (default: linux)
+	// +optional
+	// +default="linux"
+	targetOS string,
+	// Target arch (default: amd64)
+	// +optional
+	// +default="amd64"
+	targetArch string,
+) *dagger.File {
+	if targetOS == "" {
+		targetOS = "linux"
+	}
+	if targetArch == "" {
+		targetArch = "amd64"
+	}
+	return dag.Container().
+		From("golang:1.24-alpine").
+		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod")).
+		WithMountedCache("/root/.cache/go-build", dag.CacheVolume("go-build")).
+		WithDirectory("/src", src).
+		WithWorkdir("/src").
+		WithEnvVariable("CGO_ENABLED", "0").
+		WithEnvVariable("GOOS", targetOS).
+		WithEnvVariable("GOARCH", targetArch).
+		WithExec([]string{"go", "mod", "download"}).
+		WithExec([]string{
+			"go", "build",
+			"-ldflags", "-s -w",
+			"-o", "/out/workshop",
+			"./cli/",
+		}).
+		File("/out/workshop")
+}
+
+// ── GoModTidy ─────────────────────────────────────────────────────────────────
+
+// GoModTidy runs go mod tidy and returns a directory containing the updated
+// go.mod and go.sum. Use this after adding new dependencies:
+//
+//	dagger call go-mod-tidy --src . -o .
+func (m *WorkshopBuilder) GoModTidy(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+) *dagger.Directory {
+	tidied := dag.Container().
+		From("golang:1.24-alpine").
+		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod")).
+		WithMountedCache("/root/.cache/go-build", dag.CacheVolume("go-build")).
+		WithDirectory("/src", src).
+		WithWorkdir("/src").
+		WithExec([]string{"go", "mod", "tidy"}).
+		Directory("/src")
+	return dag.Directory().
+		WithFile("go.mod", tidied.File("go.mod")).
+		WithFile("go.sum", tidied.File("go.sum"))
 }
 
 // ── FrontendLockfile ──────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
   import { api, type StepListItem, type ValidateResult } from '../lib/api.js'
   import { renderMarkdown, processMermaid } from '../lib/markdown.js'
   import ValidateButton from './ValidateButton.svelte'
+  import HelpPanel from './HelpPanel.svelte'
   import Terminal from './Terminal.svelte'
 
   let {
@@ -125,6 +126,9 @@
             </button>
           {/if}
         </div>
+
+        <!-- Help panel (hints/explain/solve) -->
+        <HelpPanel {stepId} {step} />
       {/if}
     {/if}
   </div>

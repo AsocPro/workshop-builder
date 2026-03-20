@@ -2,7 +2,9 @@
 
 ## Goal
 
-Real `workshop-base:ubuntu` and `workshop-base:alpine` images built reproducibly. Removes the ad-hoc binary injection from the workshop build pipeline (M4). Clean separation: workshop pipeline just does `FROM workshop-base:ubuntu`.
+Real `workshop-base:ubuntu`, `workshop-base:rocky`, and `workshop-base:debian` images built
+reproducibly via Dagger. Removes the ad-hoc binary injection from the workshop build pipeline (M4).
+Images are published to `ghcr.io/asocpro/workshop-base` for production use.
 
 ## Prerequisites
 
@@ -17,15 +19,19 @@ Real `workshop-base:ubuntu` and `workshop-base:alpine` images built reproducibly
 ## Acceptance Test
 
 ```bash
+# Build locally
 make base-images
-docker run --rm workshop-base:ubuntu which goss
-# → /usr/local/bin/goss
-docker run --rm workshop-base:ubuntu which ttyd
-# → /usr/local/bin/ttyd
-docker run --rm workshop-base:ubuntu which workshop-backend
-# → /usr/local/bin/workshop-backend
-docker run --rm workshop-base:ubuntu cat /etc/workshop-platform.bashrc
-# → PROMPT_COMMAND hook content
+
+docker run --rm workshop-base:ubuntu  which goss           # → /usr/local/bin/goss
+docker run --rm workshop-base:ubuntu  which ttyd           # → /usr/local/bin/ttyd
+docker run --rm workshop-base:ubuntu  which workshop-backend # → /usr/local/bin/workshop-backend
+docker run --rm workshop-base:ubuntu  cat /etc/workshop-platform.bashrc # → PROMPT_COMMAND hook
+
+docker run --rm workshop-base:rocky   which goss
+docker run --rm workshop-base:debian  which goss
+
+# Publish to ghcr.io (requires GITHUB_TOKEN)
+make publish-base-images
 
 # After base images exist, rebuild workshop images
 make build-workshop
@@ -37,16 +43,18 @@ make build-workshop
 
 ## Overview
 
-M12 extracts the base image logic from the workshop build pipeline into standalone reusable images:
-
 ```
 Before M12:
   workshop build pipeline: ubuntu:24.04 → [install apt packages] → [download tools] → step images
 
 After M12:
   base image pipeline: ubuntu:24.04 → [install everything] → workshop-base:ubuntu
+                       rockylinux:9 → [install everything] → workshop-base:rocky
+                       debian:bookworm-slim → [install everything] → workshop-base:debian
   workshop build pipeline: workshop-base:ubuntu → step images  (much simpler)
 ```
+
+All three distros use **bash**, so the same `PROMPT_COMMAND` hook works everywhere.
 
 ---
 
@@ -54,21 +62,20 @@ After M12:
 
 ```
 base-images/
-  ubuntu/
-    bashrc          (PROMPT_COMMAND hook for Ubuntu/bash)
-  alpine/
-    bashrc          (PROMPT_COMMAND hook for Alpine/ash)
+  bashrc          (shared PROMPT_COMMAND hook — works in bash on all three distros)
 ```
 
-The Dagger pipeline for base images is integrated into the main `dagger/main.go` module (no separate module).
+One bashrc file shared by Ubuntu, Rocky, and Debian. The Dagger pipeline for base images is
+integrated into the main `dagger/main.go` module (no separate module).
 
 ---
 
-## `base-images/ubuntu/bashrc`
+## `base-images/bashrc`
 
 ```bash
 # Workshop Platform Shell Instrumentation
-# /etc/workshop-platform.bashrc — sourced by /etc/bash.bashrc
+# /etc/workshop-platform.bashrc — sourced by /etc/bash.bashrc (Ubuntu/Debian)
+# or /etc/bashrc (Rocky)
 
 __workshop_log_command() {
     local exit_code=$?
@@ -76,7 +83,6 @@ __workshop_log_command() {
     # Get last command from history (remove leading number and spaces)
     cmd=$(history 1 | sed 's/^[ ]*[0-9]*[ ]*//')
     if [ -n "$cmd" ] && [ -d /workshop/runtime ]; then
-        # Escape for JSON using printf (handles basic cases)
         local escaped_cmd
         escaped_cmd=$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g')
         printf '{"ts":"%s","cmd":"%s","exit":%d}\n' \
@@ -92,138 +98,177 @@ PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__workshop_log_command"
 export PROMPT_COMMAND
 ```
 
-Note: Preserve the exit code — `__workshop_log_command` captures `$?` at the top and returns it at the end so the user's prompt still shows the correct exit code.
+### Per-distro sourcing
 
-## `base-images/alpine/bashrc`
-
-Alpine uses `ash` (BusyBox shell), not bash. `PROMPT_COMMAND` doesn't exist in ash. Use a different hook mechanism.
-
-For Alpine, use a custom `$ENV` file or source from `/etc/profile`:
-
-```sh
-# Workshop Platform Shell Instrumentation
-# /etc/workshop-platform.ashrc
-
-# Note: ash doesn't support PROMPT_COMMAND directly
-# Use trap DEBUG or a wrapper — ash has limited options
-# For MVP: use PS1 trick with command logging disabled in Alpine
-# This is a known limitation; use Ubuntu base for workshops needing command logging
-
-# Minimal stub — define the variable to avoid errors
-WORKSHOP_PLATFORM_INSTRUMENTED=1
-export WORKSHOP_PLATFORM_INSTRUMENTED
-```
-
-**MVP decision**: Command logging works in Ubuntu base only. Alpine base is supported for lightweight workshops that don't need command logging. Document this limitation.
-
-A more complete Alpine approach (post-MVP) would use a wrapper script around ash that logs commands.
+| Distro | Interactive bash config | Append line |
+|--------|------------------------|-------------|
+| Ubuntu | `/etc/bash.bashrc` | `source /etc/workshop-platform.bashrc` |
+| Debian | `/etc/bash.bashrc` | `source /etc/workshop-platform.bashrc` |
+| Rocky  | `/etc/bashrc` | `source /etc/workshop-platform.bashrc` |
 
 ---
 
-## Dagger: `BuildBaseImages` function
+## tini Strategy
+
+Use a downloaded static binary for all three distros — consistent, no package manager variation.
+
+```
+/sbin/tini  (all three distros)
+```
+
+Entrypoint for all: `["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]`
+
+---
+
+## Dagger: `BuildBaseImages` and `PublishBaseImages`
 
 Add to `dagger/main.go`:
 
 ```go
-// BuildBaseImages builds workshop-base:ubuntu and workshop-base:alpine.
-// Both images are published to the local registry.
+// BuildBaseImages builds workshop-base:{ubuntu,rocky,debian} and publishes them
+// to the local Podman/Docker daemon (no registry auth required).
 func (m *WorkshopBuilder) BuildBaseImages(
     ctx context.Context,
     // +defaultPath="/"
     src *dagger.Directory,
 ) error {
-    // Build backend binary (includes embedded frontend)
     backendBin := m.BuildBackend(ctx, src)
 
-    // Build Ubuntu base
-    if err := m.buildUbuntuBase(ctx, src, backendBin); err != nil {
-        return fmt.Errorf("building ubuntu base: %w", err)
+    for _, variant := range []string{"ubuntu", "rocky", "debian"} {
+        img, err := m.buildBaseImage(ctx, src, variant, backendBin)
+        if err != nil {
+            return fmt.Errorf("building %s base: %w", variant, err)
+        }
+        tag := "workshop-base:" + variant
+        fmt.Printf("Publishing %s locally\n", tag)
+        if _, err := img.Publish(ctx, tag); err != nil {
+            return fmt.Errorf("publishing %s: %w", tag, err)
+        }
     }
-
-    // Build Alpine base
-    if err := m.buildAlpineBase(ctx, src, backendBin); err != nil {
-        return fmt.Errorf("building alpine base: %w", err)
-    }
-
     return nil
+}
+
+// PublishBaseImages builds all three base images and pushes them to ghcr.io.
+// Requires a GitHub token with write:packages scope.
+// Usage: dagger call publish-base-images --src . --token env:GITHUB_TOKEN
+func (m *WorkshopBuilder) PublishBaseImages(
+    ctx context.Context,
+    // +defaultPath="/"
+    src *dagger.Directory,
+    // GitHub token with write:packages scope
+    token *dagger.Secret,
+    // Registry repo prefix (default: ghcr.io/asocpro/workshop-base)
+    // +optional
+    // +default="ghcr.io/asocpro/workshop-base"
+    repo string,
+) error {
+    if repo == "" {
+        repo = "ghcr.io/asocpro/workshop-base"
+    }
+    backendBin := m.BuildBackend(ctx, src)
+
+    for _, variant := range []string{"ubuntu", "rocky", "debian"} {
+        img, err := m.buildBaseImage(ctx, src, variant, backendBin)
+        if err != nil {
+            return fmt.Errorf("building %s base: %w", variant, err)
+        }
+        tag := repo + ":" + variant
+        fmt.Printf("Publishing %s\n", tag)
+        img = img.WithRegistryAuth("ghcr.io", "x-access-token", token)
+        if _, err := img.Publish(ctx, tag); err != nil {
+            return fmt.Errorf("publishing %s: %w", tag, err)
+        }
+    }
+    return nil
+}
+
+// buildBaseImage builds a single workshop base image variant.
+func (m *WorkshopBuilder) buildBaseImage(
+    ctx context.Context,
+    src *dagger.Directory,
+    variant string,
+    backendBin *dagger.File,
+) (*dagger.Container, error) {
+    tini := m.downloadTini(ctx)
+    goss := m.downloadGoss(ctx)
+    ttyd := m.downloadTtyd(ctx)
+    bashrc := src.File("base-images/bashrc")
+
+    switch variant {
+    case "ubuntu":
+        return m.buildUbuntuBase(ctx, bashrc, backendBin, tini, goss, ttyd), nil
+    case "rocky":
+        return m.buildRockyBase(ctx, bashrc, backendBin, tini, goss, ttyd), nil
+    case "debian":
+        return m.buildDebianBase(ctx, bashrc, backendBin, tini, goss, ttyd), nil
+    default:
+        return nil, fmt.Errorf("unknown variant: %s", variant)
+    }
 }
 
 func (m *WorkshopBuilder) buildUbuntuBase(
     ctx context.Context,
-    src *dagger.Directory,
-    backendBin *dagger.File,
-) error {
-    tini := m.downloadTini(ctx)
-    goss := m.downloadGoss(ctx)
-    ttyd := m.downloadTtyd(ctx)
-
-    img := dag.Container().
+    bashrc *dagger.File,
+    backendBin, tini, goss, ttyd *dagger.File,
+) *dagger.Container {
+    return dag.Container().
         From("ubuntu:24.04").
-        // Install system packages
         WithExec([]string{
             "sh", "-c",
             "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
-                "bash curl ca-certificates tini && " +
-                "rm -rf /var/lib/apt/lists/*",
-        }).
-        // Install platform binaries
-        WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
-        WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
-        WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
-        // Install bashrc instrumentation
-        WithFile("/etc/workshop-platform.bashrc",
-            src.File("base-images/ubuntu/bashrc")).
-        WithExec([]string{
-            "sh", "-c",
-            `echo '\n# Workshop Platform\nif [ -f /etc/workshop-platform.bashrc ]; then\n    . /etc/workshop-platform.bashrc\nfi' >> /etc/bash.bashrc`,
-        }).
-        // Create runtime directory template
-        WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
-        // Set entrypoint
-        WithEntrypoint([]string{"/usr/bin/tini", "--", "/usr/local/bin/workshop-backend"})
-
-    tag := "workshop-base:ubuntu"
-    fmt.Printf("Publishing %s\n", tag)
-    _, err := img.Publish(ctx, tag)
-    return err
-}
-
-func (m *WorkshopBuilder) buildAlpineBase(
-    ctx context.Context,
-    src *dagger.Directory,
-    backendBin *dagger.File,
-) error {
-    tini := m.downloadTini(ctx)
-    goss := m.downloadGossAlpine(ctx)
-    ttydBin := m.downloadTtyd(ctx) // ttyd has a static binary that works on alpine
-
-    img := dag.Container().
-        From("alpine:3.21").
-        WithExec([]string{
-            "sh", "-c",
-            "apk add --no-cache bash curl ca-certificates",
+                "bash curl ca-certificates jq && rm -rf /var/lib/apt/lists/*",
         }).
         WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
         WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
-        WithFile("/usr/local/bin/ttyd", ttydBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
         WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
-        WithFile("/etc/workshop-platform.ashrc",
-            src.File("base-images/alpine/bashrc")).
+        WithFile("/etc/workshop-platform.bashrc", bashrc).
+        WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
         WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
         WithEntrypoint([]string{"/sbin/tini", "--", "/usr/local/bin/workshop-backend"})
-
-    tag := "workshop-base:alpine"
-    fmt.Printf("Publishing %s\n", tag)
-    _, err := img.Publish(ctx, tag)
-    return err
 }
 
-// downloadGossAlpine downloads the musl-linked goss binary for Alpine.
-func (m *WorkshopBuilder) downloadGossAlpine(ctx context.Context) *dagger.File {
-    // goss provides a musl-linked binary for Alpine
-    return dag.HTTP("https://github.com/goss-org/goss/releases/download/v0.4.9/goss-linux-amd64")
-    // Note: goss ships a statically-linked binary that works on musl too
-    // If not, use the -musl variant: goss-linux-amd64-musl
+func (m *WorkshopBuilder) buildDebianBase(
+    ctx context.Context,
+    bashrc *dagger.File,
+    backendBin, tini, goss, ttyd *dagger.File,
+) *dagger.Container {
+    return dag.Container().
+        From("debian:bookworm-slim").
+        WithExec([]string{
+            "sh", "-c",
+            "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
+                "bash curl ca-certificates jq && rm -rf /var/lib/apt/lists/*",
+        }).
+        WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/etc/workshop-platform.bashrc", bashrc).
+        WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
+        WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
+        WithEntrypoint([]string{"/sbin/tini", "--", "/usr/local/bin/workshop-backend"})
+}
+
+func (m *WorkshopBuilder) buildRockyBase(
+    ctx context.Context,
+    bashrc *dagger.File,
+    backendBin, tini, goss, ttyd *dagger.File,
+) *dagger.Container {
+    return dag.Container().
+        From("rockylinux:9").
+        WithExec([]string{
+            "sh", "-c",
+            "dnf install -y bash curl ca-certificates jq && dnf clean all",
+        }).
+        WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+        WithFile("/etc/workshop-platform.bashrc", bashrc).
+        WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bashrc`}).
+        WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
+        WithEntrypoint([]string{"/sbin/tini", "--", "/usr/local/bin/workshop-backend"})
 }
 ```
 
@@ -231,7 +276,7 @@ func (m *WorkshopBuilder) downloadGossAlpine(ctx context.Context) *dagger.File {
 
 ## Update Workshop Build Pipeline (`BuildWorkshop`)
 
-After M12, `buildStepImage` no longer installs tools inline — it just uses the base image:
+After M12, `buildStepImage` no longer installs tools inline — it uses the base image:
 
 ```go
 func (m *WorkshopBuilder) buildStepImage(
@@ -241,25 +286,18 @@ func (m *WorkshopBuilder) buildStepImage(
     compiled *compileOutput,
     step stepOutput,
     position int,
-    backendBin *dagger.File,   // no longer used (in base image)
-    tini, goss, ttyd *dagger.File, // no longer used
     prev *dagger.Container,
 ) *dagger.Container {
-    var base *dagger.Container
+    var ctr *dagger.Container
     if prev == nil {
-        // First step: FROM workshop-base:ubuntu (or whatever base.image says)
-        base = dag.Container().From(compiled.BaseImage)
-        // Bake /workshop/ metadata (ALL steps)
-        base = m.bakeWorkshopMetadata(ctx, base, src, workshopPath, compiled)
+        // First step: FROM workshop-base:ubuntu (or compiled.BaseImage)
+        ctr = dag.Container().From(compiled.BaseImage)
+        ctr = m.bakeWorkshopMetadata(ctx, ctr, src, workshopPath, compiled)
+        ctr = ctr.WithExec([]string{"mkdir", "-p", "/workshop/runtime"})
     } else {
-        base = prev
+        ctr = prev
     }
-
-    // Apply this step's file mappings, commands, env
-    // (same as before)
-    // ...
-
-    return base
+    // ... same file mappings, commands, env, entrypoint as before
 }
 ```
 
@@ -268,25 +306,28 @@ Add `BaseImage` to `compileOutput`:
 type compileOutput struct {
     WorkshopJSON  string
     WorkshopImage string
-    BaseImage     string   // from workshop.yaml base.image
+    BaseImage     string   // from workshop.yaml base.image, default "workshop-base:ubuntu"
     Steps         []stepOutput
 }
 ```
 
-And populate it in `cmd/compile-workshop/main.go`:
+Populate in `cmd/compile-workshop/main.go`:
 ```go
 out.BaseImage = loaded.Manifest.Base.Image
 if out.BaseImage == "" {
-    out.BaseImage = "workshop-base:ubuntu" // default
+    out.BaseImage = "workshop-base:ubuntu"
 }
 ```
+
+Also remove `backendBin`, `tini`, `goss`, `ttyd` parameters from `buildStepImage` and
+their download calls from `BuildWorkshop` — they're now in the base image.
 
 ---
 
 ## `Makefile` Update
 
 ```makefile
-.PHONY: test build-backend build-workshop base-images build-cli
+.PHONY: test build-backend build-workshop base-images publish-base-images build-cli
 
 test:
 	dagger call test --src .
@@ -297,6 +338,9 @@ build-backend:
 base-images:
 	dagger call build-base-images --src .
 
+publish-base-images:
+	dagger call publish-base-images --src . --token env:GITHUB_TOKEN
+
 build-workshop: base-images
 	dagger call build-workshop --src . --workshop-path examples/hello-linux
 
@@ -304,6 +348,31 @@ build-cli:
 	dagger call build-cli --src . -o workshop
 	chmod +x workshop
 ```
+
+---
+
+## ghcr.io Setup
+
+ghcr.io (GitHub Container Registry) is **free for public repositories** under a GitHub org or user.
+Images published as public packages have no storage/bandwidth limits.
+
+Published image references:
+```
+ghcr.io/asocpro/workshop-base:ubuntu
+ghcr.io/asocpro/workshop-base:rocky
+ghcr.io/asocpro/workshop-base:debian
+```
+
+### Authentication
+
+The `GITHUB_TOKEN` passed to `publish-base-images` must have `write:packages` scope.
+For CI (GitHub Actions), the built-in `GITHUB_TOKEN` works automatically.
+For local use, create a PAT at https://github.com/settings/tokens with `write:packages`.
+
+### Making images public
+
+After first push, go to:
+`https://github.com/orgs/asocpro/packages` → package settings → change visibility to Public.
 
 ---
 
@@ -317,7 +386,8 @@ Always use the latest stable release at time of implementation:
 | goss | https://github.com/goss-org/goss/releases |
 | ttyd | https://github.com/tsl0922/ttyd/releases |
 | Ubuntu | https://hub.docker.com/_/ubuntu |
-| Alpine | https://hub.docker.com/_/alpine |
+| Debian | https://hub.docker.com/_/debian |
+| Rocky Linux | https://hub.docker.com/_/rockylinux |
 | golang | https://hub.docker.com/_/golang |
 | node | https://hub.docker.com/_/node |
 
@@ -325,21 +395,22 @@ The plan shows specific versions as examples — replace with actual latest stab
 
 ---
 
-## tini in Ubuntu vs Alpine
-
-- Ubuntu: Install tini via apt (`apt-get install -y tini`) → lands at `/usr/bin/tini`
-- Alpine: Download static binary → install at `/sbin/tini`
-
-Make sure the entrypoint path matches:
-- Ubuntu entrypoint: `["/usr/bin/tini", "--", "/usr/local/bin/workshop-backend"]`
-- Alpine entrypoint: `["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]`
-
----
-
 ## Key Decisions
 
-- **M12 does NOT remove M4 tooling download logic immediately** — implement the base images, then update `BuildWorkshop` to use `FROM workshop-base:ubuntu` instead of `FROM ubuntu:24.04`. The M4 fallback logic can be kept as a code path for custom base images.
-- **Alpine command logging**: Limited in MVP — documented limitation. Ubuntu is the primary target.
-- **Base images published to local registry**: `workshop-base:ubuntu` and `workshop-base:alpine`. For production, these would be pushed to a real registry (e.g., `ghcr.io/asocpro/workshop-base:ubuntu`).
-- **Backend binary includes embedded frontend**: `BuildBaseImages` calls `BuildBackend` which already builds the frontend first (M6). So the base image contains the full binary.
-- **No version tags on base images for MVP**: Just `workshop-base:ubuntu` (no `:latest` or `:v1.0` distinction). Add versioning post-MVP.
+- **Three distros, all bash**: Ubuntu, Debian, Rocky. All use `bash` → identical `PROMPT_COMMAND`
+  hook. Rocky sources from `/etc/bashrc`; Ubuntu/Debian source from `/etc/bash.bashrc`.
+- **Alpine dropped**: ash shell lacks `PROMPT_COMMAND`; command logging is a core feature.
+  Alpine may be revisited post-MVP if there's a workaround.
+- **tini static binary for all**: downloaded via `dag.HTTP()` for consistency — no package manager
+  variation.
+- **Local vs published**: `make base-images` publishes locally (no auth). `make publish-base-images`
+  pushes to `ghcr.io/asocpro/workshop-base` with a GitHub token.
+- **No version tags on base images for MVP**: Just `:ubuntu`, `:rocky`, `:debian`. Add
+  versioning (`:v1.0`, `:latest`) post-MVP.
+- **Backend binary includes embedded frontend**: `BuildBaseImages` calls `BuildBackend` which
+  already builds the frontend first (M6). The base image contains the full binary.
+- **M12 does NOT remove M4 tooling download logic immediately**: Implement the base images first,
+  then update `BuildWorkshop` to `FROM workshop-base:ubuntu`. M4 download logic is removed
+  as part of this milestone since the base image replaces it.
+- **`workshop.yaml` default base image**: `workshop-base:ubuntu`. Workshop authors can specify
+  `workshop-base:rocky` or `workshop-base:debian` via `base.image`.

@@ -37,12 +37,17 @@ func main() {
 		log.Printf("warning: could not create runtime dir: %v", err)
 	}
 
+	// Start command log watcher
+	commandLogPath := filepath.Join(workshopRoot, "runtime", "command-log.jsonl")
+	cmdLog := store.NewCommandLog(commandLogPath)
+	cmdLog.Start()
+
 	// Spawn ttyd (terminal)
 	ttydMgr := process.NewTTYDManager(7681)
 	ttydMgr.Start()
 
 	// Create and start HTTP server
-	srv := NewServer(meta, st, managementURL)
+	srv := NewServer(meta, st, managementURL, cmdLog)
 
 	addr := ":" + port
 	fmt.Printf("Workshop backend listening on %s\n", addr)

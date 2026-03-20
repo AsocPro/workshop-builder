@@ -24,7 +24,8 @@ func newTestServer(t *testing.T) http.Handler {
 		t.Fatalf("LoadMetadata: %v", err)
 	}
 	st := store.NewState(meta)
-	return NewServer(meta, st, "http://localhost:9090")
+	cmdLog := store.NewCommandLog(filepath.Join(testWorkshopRoot(t), "runtime", "command-log.jsonl"))
+	return NewServer(meta, st, "http://localhost:9090", cmdLog)
 }
 
 func TestGetState(t *testing.T) {

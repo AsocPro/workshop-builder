@@ -12,13 +12,15 @@ type Handlers struct {
 	Meta          *store.Metadata
 	State         *store.State
 	ManagementURL string
+	CommandLog    *store.CommandLog
 }
 
-func New(meta *store.Metadata, st *store.State, managementURL string) *Handlers {
+func New(meta *store.Metadata, st *store.State, managementURL string, cmdLog *store.CommandLog) *Handlers {
 	return &Handlers{
 		Meta:          meta,
 		State:         st,
 		ManagementURL: managementURL,
+		CommandLog:    cmdLog,
 	}
 }
 

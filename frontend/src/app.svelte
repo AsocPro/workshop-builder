@@ -5,6 +5,10 @@
   import StepContent from './components/StepContent.svelte'
   import ManagementLink from './components/ManagementLink.svelte'
 
+  // Name this tab immediately so management's target="workshop" link finds it
+  // even before state has loaded, avoiding a duplicate tab race condition.
+  window.name = 'workshop'
+
   let state = $state<WorkshopState | null>(null)
   let steps = $state<StepListItem[]>([])
   let activeStepId = $state<string | null>(null)

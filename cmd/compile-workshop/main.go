@@ -15,6 +15,7 @@ import (
 // Output is the JSON structure emitted to stdout.
 type Output struct {
 	WorkshopJSON string       `json:"workshopJson"`
+	BaseImage    string       `json:"baseImage"`
 	Steps        []StepOutput `json:"steps"`
 }
 
@@ -66,8 +67,13 @@ func main() {
 		log.Fatalf("compiling workshop: %v", err)
 	}
 
+	baseImage := loaded.Manifest.Base.Image
+	if baseImage == "" {
+		baseImage = "workshop-base:ubuntu"
+	}
 	out := Output{
 		WorkshopJSON: string(compiled.WorkshopJSON),
+		BaseImage:    baseImage,
 	}
 
 	for i, cs := range compiled.Steps {
