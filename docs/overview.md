@@ -49,6 +49,7 @@ Shared logic, orchestration, and runtime enforcement. This is the system that ac
 | [Aggregation](./platform/aggregation.md) | Vector sidecar ships JSONL to Postgres/S3 in Kubernetes mode |
 | [Infrastructure Provisioners](./platform/infrastructure-provisioners.md) | k3d, vcluster orchestration |
 | [Backend Capabilities](./platform/backend-capabilities.md) | Docker vs Kubernetes feature matrix |
+| [DevContainer Feature](./platform/devcontainer-feature.md) | IDE-native delivery mode — VS Code, Codespaces, DevPod |
 
 The operator owns step transitions — these are image swaps: update Deployment spec → rollout → done. No namespace teardown or PVC restoration.
 
