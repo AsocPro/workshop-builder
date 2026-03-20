@@ -22,9 +22,10 @@ DevContainer features are published as OCI artifacts. The feature's `install.sh`
 ## Acceptance Test
 
 ```bash
-# 1. Build compile-workshop with --output-dir support
+# 1. Build compile-workshop and workshop-setup
 dagger call build-compile-workshop --src . --target-os linux --target-arch amd64 -o ./compile-workshop
-chmod +x ./compile-workshop
+dagger call build-setup --src . --target-os linux --target-arch amd64 -o ./workshop-setup
+chmod +x ./compile-workshop ./workshop-setup
 
 # 2. Compile example workshop to directory
 ./compile-workshop --workshop ./examples/hello-linux --output-dir /tmp/workshop-out
@@ -34,6 +35,10 @@ chmod +x ./compile-workshop
 #   /tmp/workshop-out/steps/step-1-intro/content.md
 #   /tmp/workshop-out/steps/step-1-intro/setup.json
 #   /tmp/workshop-out/steps/step-2-files/stage/hello.txt  (if step has files)
+
+# 2b. Test workshop-setup binary (shared logic with backend activate handler)
+./workshop-setup --workshop-dir /tmp/workshop-out --step step-2-files
+# Verify: files from steps 1-2 are copied to targets, commands executed
 
 # 3. Build feature tarball
 dagger call build-feature --src . -o /tmp/workshop-feature.tgz
@@ -69,27 +74,31 @@ devcontainer-feature/
     workshop/
       test.sh
 
+cmd/
+  compile-workshop/
+    main.go                  ← MODIFY: add --output-dir flag
+  workshop-setup/
+    main.go                  ← NEW: Go binary for step setup (shared logic with backend)
+
 backend/
   handlers/
     activate.go              ← NEW: in-place step setup handler
+  setup/
+    apply.go                 ← NEW: shared step-application logic (used by activate.go AND cmd/workshop-setup)
   store/
     metadata.go              ← MODIFY: add StepSetup struct, load setup.json
   server.go                  ← MODIFY: wire activate handler in devcontainer mode
   main.go                    ← MODIFY: detect WORKSHOP_MODE env var
 
-cmd/
-  compile-workshop/
-    main.go                  ← MODIFY: add --output-dir flag
-
 dagger/
-  main.go                    ← MODIFY: add BuildFeature, BuildCompileWorkshop, parameterize BuildBackend
+  main.go                    ← MODIFY: extract buildGoBinary helper, add BuildFeature/BuildCompileWorkshop/BuildSetup, parameterize BuildBackend
 
 .github/
   workflows/
-    release.yml              ← NEW: build + publish binaries on tag push
+    release.yml              ← NEW: thin CI — calls `dagger call build-release`, uploads to GitHub release
     publish-feature.yml      ← NEW: publish feature to ghcr.io on tag push
 
-Makefile                     ← MODIFY: add build-feature, build-compile-workshop targets
+Makefile                     ← MODIFY: add build-feature, build-compile-workshop, build-setup targets
 ```
 
 ---
@@ -158,9 +167,134 @@ The compilation pipeline is unchanged — `workshop.Parse()` → `workshop.Valid
 
 ---
 
-## Step 2: Backend DevContainer Mode
+## Step 2: Shared Step-Application Logic + Backend DevContainer Mode
 
-### 2a. Mode Detection
+### Consolidation principle
+
+Step application (read `setup.json`, copy files from `stage/`, run commands) is needed in two places:
+1. **At container build time** — `postCreateCommand` pre-applies steps up to the `step` option
+2. **At runtime** — backend's activate handler applies the next step on forward navigation
+
+Rather than implementing this twice (once in bash/python, once in Go), we implement it **once in Go** as a shared package, then consume it from both:
+- `cmd/workshop-setup/main.go` — standalone CLI binary for build-time use
+- `backend/handlers/activate.go` — HTTP handler for runtime use
+
+### 2a. Shared Package
+
+**New file: `backend/setup/apply.go`**
+
+Core step-application logic, no HTTP or CLI dependencies:
+
+```go
+package setup
+
+import (
+    "encoding/json"
+    "fmt"
+    "io"
+    "os"
+    "os/exec"
+    "path/filepath"
+)
+
+type FileMapping struct {
+    Source string `json:"source"`
+    Target string `json:"target"`
+}
+
+type StepSetup struct {
+    Files    []FileMapping     `json:"files"`
+    Commands []string          `json:"commands"`
+    Env      map[string]string `json:"env"`
+}
+
+// LoadSetup reads setup.json for a given step.
+func LoadSetup(workshopDir, stepID string) (*StepSetup, error) {
+    path := filepath.Join(workshopDir, "steps", stepID, "setup.json")
+    data, err := os.ReadFile(path)
+    if err != nil {
+        return nil, fmt.Errorf("reading setup.json for %s: %w", stepID, err)
+    }
+    var s StepSetup
+    if err := json.Unmarshal(data, &s); err != nil {
+        return nil, fmt.Errorf("parsing setup.json for %s: %w", stepID, err)
+    }
+    return &s, nil
+}
+
+// Apply executes a step's setup: copies staged files to targets, runs commands.
+func Apply(workshopDir, stepID string, setup *StepSetup) error {
+    stageDir := filepath.Join(workshopDir, "steps", stepID, "stage")
+
+    // Copy files
+    for _, f := range setup.Files {
+        src := filepath.Join(stageDir, f.Source)
+        if err := copyFile(src, f.Target); err != nil {
+            return fmt.Errorf("copying %s → %s: %w", f.Source, f.Target, err)
+        }
+    }
+
+    // Run commands
+    for _, cmdStr := range setup.Commands {
+        cmd := exec.Command("sh", "-c", cmdStr)
+        cmd.Stdout = os.Stdout
+        cmd.Stderr = os.Stderr
+        if err := cmd.Run(); err != nil {
+            return fmt.Errorf("running command %q: %w", cmdStr, err)
+        }
+    }
+    return nil
+}
+
+func copyFile(src, dst string) error {
+    if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+        return err
+    }
+    // ... standard file copy
+}
+```
+
+### 2b. `cmd/workshop-setup` CLI
+
+**New file: `cmd/workshop-setup/main.go`**
+
+Standalone binary that applies steps up to a target. No python3/jq dependency — pure Go.
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "flag"
+    "fmt"
+    "log"
+    "os"
+
+    "github.com/asocpro/workshop-builder/backend/setup"
+)
+
+func main() {
+    workshopDir := flag.String("workshop-dir", "/workshop", "compiled workshop directory")
+    throughStep := flag.String("step", "", "apply setup through this step ID (inclusive)")
+    flag.Parse()
+
+    if *throughStep == "" {
+        fmt.Println("No step specified, starting at step 1.")
+        return
+    }
+
+    // Read step order from workshop.json
+    stepIDs, err := readStepOrder(*workshopDir)
+    // ... iterate steps, call setup.LoadSetup + setup.Apply for each up to throughStep
+}
+```
+
+This binary is:
+- Built by the same Dagger pipeline and included in GitHub releases
+- Downloaded by `install.sh` alongside the other binaries
+- Called by the `workshop-compile-and-setup` helper in `postCreateCommand`
+
+### 2c. Mode Detection
 
 **File: `backend/main.go`**
 
@@ -174,75 +308,50 @@ When `workshopMode == "devcontainer"`:
 - Skip management URL requirement (no external CLI)
 - Log that we're in devcontainer mode
 
-### 2b. Setup Metadata
+### 2d. Setup Metadata in Store
 
 **File: `backend/store/metadata.go`**
 
-Add types and loader for `setup.json`:
+Add method to load setup per step (delegates to the shared package):
 
 ```go
-type FileMapping struct {
-    Source string `json:"source"`
-    Target string `json:"target"`
-}
-
-type StepSetup struct {
-    Files    []FileMapping     `json:"files"`
-    Commands []string          `json:"commands"`
-    Env      map[string]string `json:"env"`
+func (s *MetadataStore) GetStepSetup(stepID string) (*setup.StepSetup, error) {
+    return setup.LoadSetup(s.basePath, stepID)
 }
 ```
 
-Add method to `MetadataStore` to load setup per step:
-
-```go
-func (s *MetadataStore) GetStepSetup(stepID string) (*StepSetup, error) {
-    path := filepath.Join(s.basePath, "steps", stepID, "setup.json")
-    // read and unmarshal
-}
-```
-
-### 2c. Activate Handler
+### 2e. Activate Handler
 
 **New file: `backend/handlers/activate.go`**
 
-This handler applies a step's setup (copy files, run commands, set env) when the student navigates forward in devcontainer mode.
+Uses the shared `setup.Apply()` — no duplicated file-copy or command-execution logic:
 
 ```go
-func ActivateStep(store *store.MetadataStore, state *store.State) http.HandlerFunc {
+func ActivateStep(metaStore *store.MetadataStore, state *store.State, workshopDir string) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         stepID := chi.URLParam(r, "id")
 
         // 1. Check if already applied
         if state.IsStepApplied(stepID) {
-            // Already applied — just update active step
             state.SetActiveStep(stepID)
             json.NewEncoder(w).Encode(map[string]string{"status": "already_applied"})
             return
         }
 
-        // 2. Load setup
-        setup, err := store.GetStepSetup(stepID)
+        // 2. Load and apply setup (shared logic)
+        stepSetup, err := setup.LoadSetup(workshopDir, stepID)
+        if err != nil { /* ... */ }
 
-        // 3. Copy files from stage/ to targets
-        for _, f := range setup.Files {
-            src := filepath.Join(store.StepDir(stepID), "stage", f.Source)
-            // copy src → f.Target (create parent dirs as needed)
-        }
+        if err := setup.Apply(workshopDir, stepID, stepSetup); err != nil { /* ... */ }
 
-        // 4. Run commands
-        for _, cmd := range setup.Commands {
-            exec.Command("sh", "-c", cmd).Run()
-        }
-
-        // 5. Mark as applied
+        // 3. Mark as applied
         state.MarkStepApplied(stepID)
         state.SetActiveStep(stepID)
     }
 }
 ```
 
-### 2d. Wire It Up
+### 2f. Wire It Up
 
 **File: `backend/server.go`**
 
@@ -250,7 +359,7 @@ In devcontainer mode, the navigate endpoint should trigger activation:
 
 ```go
 if workshopMode == "devcontainer" {
-    r.Post("/api/steps/{id}/activate", handlers.ActivateStep(metaStore, state))
+    r.Post("/api/steps/{id}/activate", handlers.ActivateStep(metaStore, state, workshopDir))
     // Navigate also triggers activation in devcontainer mode
 }
 ```
@@ -307,6 +416,11 @@ The frontend's "Next Step" action calls `/api/steps/{id}/activate` (in devcontai
 
 **New file: `devcontainer-feature/src/workshop/install.sh`**
 
+Key consolidation decisions:
+- **Bashrc**: Downloads the canonical `base-images/bashrc` from the GitHub release (asset: `workshop-platform.bashrc`). Single source of truth — no inline copy.
+- **Tool binaries (ttyd, goss)**: Downloaded from the GitHub release as bundled assets (not from upstream). The release workflow downloads them once and attaches them. This eliminates hardcoded version constants in `install.sh` — one version tag controls everything.
+- **`workshop-setup`**: A Go binary (not a bash+python script). Uses the same `backend/setup` package as the backend's activate handler. No python3/jq dependency.
+
 ```bash
 #!/bin/bash
 set -e
@@ -329,54 +443,30 @@ fi
 
 echo "Installing workshop platform tools ${VERSION} (${ARCH})..."
 
-# Download platform binaries from GitHub releases
-for BINARY in workshop-backend compile-workshop; do
+# All binaries (ours + vendored tools) are in the GitHub release.
+# This eliminates version drift — one release tag pins everything.
+for BINARY in workshop-backend compile-workshop workshop-setup ttyd goss; do
     URL="${GITHUB}/releases/download/${VERSION}/${BINARY}-linux-${ARCH}"
     echo "  Downloading ${BINARY}..."
     curl -fsSL "$URL" -o "/usr/local/bin/${BINARY}"
     chmod +x "/usr/local/bin/${BINARY}"
 done
 
-# Download ttyd
-TTYD_VERSION="1.7.7"
-curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ARCH}" \
-    -o /usr/local/bin/ttyd
-chmod +x /usr/local/bin/ttyd
+# Install command logging instrumentation from the release.
+# Single source of truth: base-images/bashrc (same file used by base image pipeline).
+curl -fsSL "${GITHUB}/releases/download/${VERSION}/workshop-platform.bashrc" \
+    -o /etc/workshop-platform.bashrc
 
-# Download goss
-GOSS_VERSION="v0.4.9"
-curl -fsSL "https://github.com/goss-org/goss/releases/download/${GOSS_VERSION}/goss-linux-${ARCH}" \
-    -o /usr/local/bin/goss
-chmod +x /usr/local/bin/goss
-
-# Install command logging instrumentation
-cat > /etc/workshop-platform.bashrc << 'BASHRC'
-# Workshop platform command logging
-if [ -n "$WORKSHOP_MODE" ] && [ -d /workshop/runtime ]; then
-    _workshop_log_command() {
-        local cmd
-        cmd=$(history 1 | sed 's/^ *[0-9]* *//')
-        if [ -n "$cmd" ]; then
-            printf '{"ts":"%s","cmd":"%s","cwd":"%s","exit":%d}\n' \
-                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                "$(echo "$cmd" | sed 's/"/\\"/g')" \
-                "$PWD" \
-                "$?" >> /workshop/runtime/commands.jsonl
-        fi
-    }
-    PROMPT_COMMAND="_workshop_log_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
-fi
-BASHRC
-
-# Source from system bash profile
+# Source from system bash profile (same pattern as base image build)
 if ! grep -q 'workshop-platform.bashrc' /etc/bash.bashrc 2>/dev/null; then
-    echo '[ -f /etc/workshop-platform.bashrc ] && . /etc/workshop-platform.bashrc' >> /etc/bash.bashrc
+    echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc
 fi
 
-# Create runtime directory
+# Create runtime directory with open permissions (postCreateCommand runs as container user)
 mkdir -p /workshop/runtime
+chmod 777 /workshop /workshop/runtime
 
-# Install compile-and-setup helper script
+# Install compile-and-setup helper script (thin wrapper — all logic is in Go binaries)
 cat > /usr/local/bin/workshop-compile-and-setup << 'HELPER'
 #!/bin/bash
 set -e
@@ -389,83 +479,17 @@ compile-workshop --workshop "$WORKSHOP_PATH" --output-dir /workshop
 
 # If a starting step is specified, apply setup for all steps up to it
 if [ -n "$STEP" ]; then
-    workshop-setup --step "$STEP"
+    workshop-setup --workshop-dir /workshop --step "$STEP"
 fi
 
 echo "Workshop compiled and ready."
 HELPER
 chmod +x /usr/local/bin/workshop-compile-and-setup
 
-# Install setup helper (applies steps up to a given step ID)
-cat > /usr/local/bin/workshop-setup << 'SETUP'
-#!/bin/bash
-set -e
-
-STEP=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --step) STEP="$2"; shift 2 ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
-    esac
-done
-
-if [ -z "$STEP" ]; then
-    echo "No step specified, starting at step 1."
-    exit 0
-fi
-
-# Read step order from workshop.json
-STEPS=$(cat /workshop/workshop.json | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-for s in data.get('steps', []):
-    print(s['id'])
-" 2>/dev/null || cat /workshop/workshop.json | jq -r '.steps[].id' 2>/dev/null)
-
-# Apply setup for each step up to and including the target
-FOUND=0
-for S in $STEPS; do
-    SETUP_FILE="/workshop/steps/${S}/setup.json"
-    if [ -f "$SETUP_FILE" ]; then
-        echo "Applying setup for ${S}..."
-
-        # Copy staged files
-        python3 -c "
-import json, shutil, os
-setup = json.load(open('$SETUP_FILE'))
-for f in setup.get('files', []):
-    src = '/workshop/steps/${S}/stage/' + f['source']
-    tgt = f['target']
-    os.makedirs(os.path.dirname(tgt), exist_ok=True)
-    shutil.copy2(src, tgt)
-" 2>/dev/null || true
-
-        # Run commands
-        python3 -c "
-import json, subprocess
-setup = json.load(open('$SETUP_FILE'))
-for cmd in setup.get('commands', []):
-    subprocess.run(cmd, shell=True, check=True)
-" 2>/dev/null || true
-    fi
-
-    if [ "$S" = "$STEP" ]; then
-        FOUND=1
-        break
-    fi
-done
-
-if [ "$FOUND" -eq 0 ]; then
-    echo "Warning: step '${STEP}' not found in workshop.json"
-    exit 1
-fi
-
-echo "Setup applied through step ${STEP}."
-SETUP
-chmod +x /usr/local/bin/workshop-setup
-
 echo "Workshop platform tools installed successfully."
 ```
+
+The `workshop-setup` helper is now just a 10-line bash wrapper calling two Go binaries. No python3, no jq, no JSON parsing in shell.
 
 ### 3c. Feature Test
 
@@ -489,10 +513,10 @@ check() {
 
 check workshop-backend
 check compile-workshop
+check workshop-setup
 check ttyd
 check goss
 check workshop-compile-and-setup
-check workshop-setup
 
 # Verify runtime directory exists
 if [ -d /workshop/runtime ]; then
@@ -529,46 +553,83 @@ echo "All tests passed."
 
 **File: `dagger/main.go`**
 
-Add three functions:
+#### Refactor: `buildGoBinary` helper
 
-#### `BuildCompileWorkshop`
-
-Same pattern as `BuildCLI` — cross-compile the `cmd/compile-workshop` binary:
+Currently `BuildBackend`, `BuildCLI`, and (soon) `BuildCompileWorkshop` + `BuildSetup` all duplicate the same golang cross-compile boilerplate. Extract a private helper:
 
 ```go
-func (m *WorkshopBuilder) BuildCompileWorkshop(
-    ctx context.Context,
+// buildGoBinary cross-compiles a Go binary from the given package path.
+// All Go binary builds go through this single function.
+func (m *WorkshopBuilder) buildGoBinary(
     src *dagger.Directory,
-    targetOS string,    // "linux"
-    targetArch string,  // "amd64" or "arm64"
+    pkg string,           // e.g. "./cli/", "./cmd/compile-workshop/", "./cmd/workshop-setup/"
+    outputName string,    // e.g. "workshop", "compile-workshop", "workshop-setup"
+    targetOS string,
+    targetArch string,
 ) *dagger.File {
     return dag.Container().
         From("golang:1.24-alpine").
+        WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod")).
+        WithMountedCache("/root/.cache/go-build", dag.CacheVolume("go-build")).
         WithDirectory("/src", src).
         WithWorkdir("/src").
         WithEnvVariable("CGO_ENABLED", "0").
         WithEnvVariable("GOOS", targetOS).
         WithEnvVariable("GOARCH", targetArch).
-        WithExec([]string{"go", "build", "-o", "/out/compile-workshop", "./cmd/compile-workshop"}).
-        File("/out/compile-workshop")
+        WithExec([]string{"go", "mod", "download"}).
+        WithExec([]string{
+            "go", "build",
+            "-ldflags", "-s -w",
+            "-o", "/out/" + outputName,
+            pkg,
+        }).
+        File("/out/" + outputName)
+}
+```
+
+Then refactor existing functions to use it:
+
+```go
+// BuildCLI — now a one-liner
+func (m *WorkshopBuilder) BuildCLI(ctx context.Context, src *dagger.Directory, targetOS, targetArch string) *dagger.File {
+    if targetOS == "" { targetOS = "linux" }
+    if targetArch == "" { targetArch = "amd64" }
+    return m.buildGoBinary(src, "./cli/", "workshop", targetOS, targetArch)
+}
+
+// BuildCompileWorkshop — new, same pattern
+func (m *WorkshopBuilder) BuildCompileWorkshop(ctx context.Context, src *dagger.Directory, targetOS, targetArch string) *dagger.File {
+    if targetOS == "" { targetOS = "linux" }
+    if targetArch == "" { targetArch = "amd64" }
+    return m.buildGoBinary(src, "./cmd/compile-workshop/", "compile-workshop", targetOS, targetArch)
+}
+
+// BuildSetup — new, same pattern
+func (m *WorkshopBuilder) BuildSetup(ctx context.Context, src *dagger.Directory, targetOS, targetArch string) *dagger.File {
+    if targetOS == "" { targetOS = "linux" }
+    if targetArch == "" { targetArch = "amd64" }
+    return m.buildGoBinary(src, "./cmd/workshop-setup/", "workshop-setup", targetOS, targetArch)
 }
 ```
 
 #### Parameterize `BuildBackend` for OS/arch
 
-Currently `BuildBackend` hardcodes linux/amd64. Add optional `targetOS` and `targetArch` parameters (default to linux/amd64 for backward compatibility):
+Add optional `targetOS` and `targetArch` parameters to the **existing** `BuildBackend` (default linux/amd64). Do NOT create a separate `BuildBackendBinary` — just extend the existing function:
 
 ```go
-func (m *WorkshopBuilder) BuildBackendBinary(
-    ctx context.Context,
-    src *dagger.Directory,
-    targetOS string,    // default "linux"
-    targetArch string,  // default "amd64"
-) *dagger.File {
-    // Same as BuildBackend but with parameterized GOOS/GOARCH
-    // Returns just the binary file, not a container
+func (m *WorkshopBuilder) BuildBackend(ctx context.Context, src *dagger.Directory, targetOS, targetArch string) *dagger.File {
+    if targetOS == "" { targetOS = "linux" }
+    if targetArch == "" { targetArch = "amd64" }
+    // Step 1: Build frontend (unchanged)
+    frontendDist := /* ... same as before ... */
+    // Step 2: Inject dist/ into Go source tree (unchanged)
+    srcWithDist := src.WithDirectory("backend/frontend/dist", frontendDist)
+    // Step 3: Use shared helper with the enriched source
+    return m.buildGoBinary(srcWithDist, "./backend/", "workshop-backend", targetOS, targetArch)
 }
 ```
+
+All existing callers (`BuildBaseImages`, `BuildWorkshop`, etc.) pass no OS/arch → defaults to linux/amd64 → no behavior change.
 
 #### `BuildFeature`
 
@@ -589,56 +650,98 @@ func (m *WorkshopBuilder) BuildFeature(
 }
 ```
 
-### 4b. GitHub Actions: Binary Releases
+### 4b. Dagger: `BuildRelease` — all release assets in one function
+
+**File: `dagger/main.go`**
+
+All release logic lives in Dagger. A new `BuildRelease` function produces a directory containing every asset needed for a GitHub release:
+
+```go
+// BuildRelease builds all release assets for both architectures.
+// Returns a directory containing all binaries, vendored tools, and bashrc.
+//
+//   dagger call build-release --src . --output /tmp/release
+func (m *WorkshopBuilder) BuildRelease(
+    ctx context.Context,
+    src *dagger.Directory,
+) *dagger.Directory {
+    out := dag.Directory()
+
+    for _, arch := range []string{"amd64", "arm64"} {
+        // Our Go binaries
+        out = out.WithFile("workshop-backend-linux-"+arch,
+            m.BuildBackend(ctx, src, "linux", arch))
+        out = out.WithFile("compile-workshop-linux-"+arch,
+            m.BuildCompileWorkshop(ctx, src, "linux", arch))
+        out = out.WithFile("workshop-setup-linux-"+arch,
+            m.BuildSetup(ctx, src, "linux", arch))
+        out = out.WithFile("workshop-cli-linux-"+arch,
+            m.BuildCLI(ctx, src, "linux", arch))
+
+        // Vendored tools — versions pinned here alongside downloadGoss/downloadTtyd
+        out = out.WithFile("ttyd-linux-"+arch, m.downloadTtydArch(arch))
+        out = out.WithFile("goss-linux-"+arch, m.downloadGossArch(arch))
+    }
+
+    // Bashrc — single source of truth is base-images/bashrc
+    out = out.WithFile("workshop-platform.bashrc", src.File("base-images/bashrc"))
+
+    return out
+}
+```
+
+This requires parameterizing the existing `downloadTtyd`/`downloadGoss` helpers for arch (currently they hardcode amd64). Add arch-aware variants:
+
+```go
+func (m *WorkshopBuilder) downloadTtydArch(arch string) *dagger.File {
+    ttydArch := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]
+    return dag.HTTP("https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd." + ttydArch)
+}
+
+func (m *WorkshopBuilder) downloadGossArch(arch string) *dagger.File {
+    return dag.HTTP("https://github.com/goss-org/goss/releases/download/v0.4.9/goss-linux-" + arch)
+}
+```
+
+The existing no-arg `downloadTtyd()`/`downloadGoss()` (used by `buildBaseImage`) become wrappers: `return m.downloadTtydArch("amd64")`. Tool versions are pinned in exactly one place: these Dagger functions.
+
+### 4c. GitHub Actions: Release (thin CI caller)
 
 **New file: `.github/workflows/release.yml`**
 
-Triggered by version tag push (`v*`). Builds binaries for linux/amd64 + linux/arm64:
+CI is a thin wrapper — it calls Dagger and attaches the output to a GitHub release. Zero build logic in the workflow itself.
 
 ```yaml
-name: Release Binaries
+name: Release
 
 on:
   push:
     tags: ['v*']
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: dagger/dagger-for-github@v7
+      - name: Build all release assets via Dagger
+        uses: dagger/dagger-for-github@v7
         with:
           verb: call
-          args: |
-            build-backend-binary --src . --target-os linux --target-arch ${{ matrix.arch }}
-            --output workshop-backend-linux-${{ matrix.arch }}
-      - uses: dagger/dagger-for-github@v7
-        with:
-          verb: call
-          args: |
-            build-compile-workshop --src . --target-os linux --target-arch ${{ matrix.arch }}
-            --output compile-workshop-linux-${{ matrix.arch }}
-      - uses: dagger/dagger-for-github@v7
-        with:
-          verb: call
-          args: |
-            build-cli --src . --platform linux/${{ matrix.arch }}
-            --output workshop-cli-linux-${{ matrix.arch }}
+          args: build-release --src . --output /tmp/release
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            workshop-backend-linux-${{ matrix.arch }}
-            compile-workshop-linux-${{ matrix.arch }}
-            workshop-cli-linux-${{ matrix.arch }}
+          files: /tmp/release/*
 ```
 
-### 4c. GitHub Actions: Publish Feature
+That's it. All logic is in `BuildRelease`. CI just calls it and uploads.
+
+### 4d. GitHub Actions: Publish Feature
 
 **New file: `.github/workflows/publish-feature.yml`**
+
+The `devcontainers/action` is the standard way to publish features as OCI artifacts. This is the one piece that can't move into Dagger (it requires OCI push to ghcr.io with specific manifest format).
 
 ```yaml
 name: Publish DevContainer Feature
@@ -664,7 +767,7 @@ jobs:
 
 This publishes to `ghcr.io/asocpro/workshop-builder/workshop:1`.
 
-### 4d. Makefile Targets
+### 4e. Makefile Targets
 
 **File: `Makefile`**
 
@@ -676,6 +779,15 @@ build-feature:
 
 build-compile-workshop:
 	dagger call build-compile-workshop --src . --target-os linux --target-arch amd64 --output ./compile-workshop
+	chmod +x ./compile-workshop
+
+build-setup:
+	dagger call build-setup --src . --target-os linux --target-arch amd64 --output ./workshop-setup
+	chmod +x ./workshop-setup
+
+# Build all release assets (both arches, vendored tools, bashrc) — same as what CI uploads
+build-release:
+	dagger call build-release --src . --output /tmp/release
 ```
 
 ---
@@ -715,8 +827,29 @@ Push to a test branch with `.devcontainer/devcontainer.json` and open in GitHub 
 ## Key Gotchas
 
 1. **Feature `install.sh` runs as root** — binaries go to `/usr/local/bin/`, bashrc to `/etc/`. No permission issues.
-2. **`postCreateCommand` runs as the container user** — may need `sudo` for writing to `/workshop/` if it's owned by root. The `install.sh` should `chmod 777 /workshop/runtime` or create with appropriate permissions.
-3. **Python fallback** — the setup helper scripts use python3 for JSON parsing. If python3 isn't available, fall back to `jq`. Most devcontainer base images have one or the other.
-4. **Binary size** — `workshop-backend` includes the embedded frontend (~5MB gzipped). Total download is ~15-20MB for all binaries. Acceptable for a one-time container build.
-5. **Architecture detection** — `uname -m` returns `x86_64` or `aarch64`. Map to `amd64`/`arm64` for GitHub release asset names.
-6. **Feature version vs tool version** — the feature's `version` field in `devcontainer-feature.json` is the feature format version. The `version` _option_ controls which binary release to download.
+2. **`postCreateCommand` runs as the container user** — `install.sh` creates `/workshop/` with `chmod 777` so the non-root user can write to it.
+3. **Binary size** — `workshop-backend` includes the embedded frontend (~5MB gzipped). Total download for all binaries is ~15-20MB. Acceptable for a one-time container build.
+4. **Architecture detection** — `uname -m` returns `x86_64` or `aarch64`. Map to `amd64`/`arm64` for GitHub release asset names.
+5. **Feature version vs tool version** — the feature's `version` field in `devcontainer-feature.json` is the feature format version. The `version` _option_ controls which binary release to download.
+
+## Consolidation Notes
+
+This milestone was designed to avoid duplicating logic that already exists in the codebase. Dagger is the primary build tool — CI workflows are thin callers that just invoke Dagger and upload results.
+
+| What | Single Source of Truth | Consumed By |
+|------|----------------------|-------------|
+| Bashrc (`workshop-platform.bashrc`) | `base-images/bashrc` | Dagger base image build, `BuildRelease` (copies to release dir), `install.sh` downloads from release |
+| Tool versions (ttyd, goss) | `dagger/main.go` → `downloadTtydArch()` / `downloadGossArch()` | Base image build, `BuildRelease` (vendors into release dir) |
+| Step-application logic (copy files, run commands) | `backend/setup/apply.go` | `cmd/workshop-setup` CLI binary, `backend/handlers/activate.go` HTTP handler |
+| Go binary cross-compile boilerplate | `dagger/main.go` → `buildGoBinary()` | `BuildBackend`, `BuildCLI`, `BuildCompileWorkshop`, `BuildSetup` |
+| All release assets | `dagger/main.go` → `BuildRelease()` | `make build-release`, CI release workflow |
+
+**Dagger owns all build logic.** CI never downloads tools, compiles binaries, or makes version decisions. The release workflow is: `dagger call build-release` → `gh-release upload`.
+
+**Bashrc**: The feature's `install.sh` downloads `workshop-platform.bashrc` from the GitHub release. `BuildRelease` copies it from `base-images/bashrc`. Never inline a second copy.
+
+**Tool versions**: Pinned once in `dagger/main.go` (the `downloadTtydArch`/`downloadGossArch` functions). Both the base image pipeline and `BuildRelease` use the same functions. No version constants in CI or `install.sh`.
+
+**Step application**: The `workshop-setup` CLI binary and the backend's activate handler both import `backend/setup.Apply()`. If step-application logic changes (e.g., adding env var injection, permission handling), it changes in one place.
+
+**Go builds**: Four Dagger functions (`BuildBackend`, `BuildCLI`, `BuildCompileWorkshop`, `BuildSetup`) all call `buildGoBinary()`. `BuildBackend` is the only one that adds a pre-step (frontend build) before calling the helper. Changing Go version, cache volumes, or ldflags happens once.

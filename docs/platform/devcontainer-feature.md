@@ -19,17 +19,18 @@ A DevContainer Feature sidesteps all of these: it runs inside a container (clean
 
 ## What the Feature Installs
 
-The `install.sh` script downloads and installs platform binaries from GitHub releases:
+The `install.sh` script downloads everything from a single GitHub release (one version tag pins all components):
 
 | Binary | Source | Purpose |
 |--------|--------|---------|
 | `workshop-backend` | Built from this repo, embedded frontend | Serves UI, API, proxies terminal |
-| `ttyd` | GitHub releases | Terminal-over-HTTP |
-| `goss` | GitHub releases | Step validation |
 | `compile-workshop` | Built from this repo | Compiles workshop.yaml → flat files |
+| `workshop-setup` | Built from this repo | Applies step setup (shared logic with backend) |
+| `ttyd` | Vendored from upstream in our release | Terminal-over-HTTP |
+| `goss` | Vendored from upstream in our release | Step validation |
 
 Plus:
-- `/etc/workshop-platform.bashrc` — command logging instrumentation (sourced in system bash profile)
+- `/etc/workshop-platform.bashrc` — command logging instrumentation, downloaded from the release (same file as `base-images/bashrc` — single source of truth)
 - `/workshop/runtime/` — pre-created runtime directory
 
 ## Feature Options
@@ -195,13 +196,26 @@ For skip-ahead scenarios:
 
 ## Publishing
 
-The feature is published as an OCI artifact to `ghcr.io/asocpro/workshop-builder/workshop` using the standard [devcontainers/action](https://github.com/devcontainers/action) GitHub Action. Major version is auto-extracted from the git tag (e.g., `v1.0.0` → `:1`).
+**Binary releases:** Dagger's `BuildRelease` function produces all release assets (our Go binaries, vendored ttyd/goss, bashrc) for both architectures. The CI release workflow is a thin caller: `dagger call build-release` → upload to GitHub Releases. No build logic lives in CI.
 
-Binary releases (prerequisite) are published to GitHub Releases with per-arch downloads (`workshop-backend-linux-{amd64,arm64}`, `compile-workshop-linux-{amd64,arm64}`).
+**Feature OCI artifact:** Published to `ghcr.io/asocpro/workshop-builder/workshop` using the standard [devcontainers/action](https://github.com/devcontainers/action) GitHub Action. Major version is auto-extracted from the git tag (e.g., `v1.0.0` → `:1`).
 
 ## Relationship to Other Components
 
-- **Base Images** — not used in devcontainer mode. The feature installs the same binaries but into whatever container the author specifies.
+- **Base Images** — not used in devcontainer mode. The feature installs the same binaries but into whatever container the author specifies. The bashrc file is shared — `base-images/bashrc` is the single source of truth, included in GitHub releases for both the base image pipeline and the feature's `install.sh`.
 - **CLI** — not needed. The devcontainer lifecycle hooks handle startup. No step-transition container swaps.
-- **Backend** — same binary, different mode. `WORKSHOP_MODE=devcontainer` enables in-place transitions instead of requesting external swap.
+- **Backend** — same binary, different mode. `WORKSHOP_MODE=devcontainer` enables in-place transitions instead of requesting external swap. The step-application logic (`backend/setup/apply.go`) is shared between the backend's activate handler and the standalone `workshop-setup` CLI.
 - **Compile-Workshop** — enhanced with `--output-dir` to write the full `/workshop/` directory structure including `setup.json` and `stage/` per step.
+- **Dagger Pipeline** — Dagger is the primary build tool. All Go binary builds share a `buildGoBinary()` helper. Tool versions (ttyd, goss) are pinned in Dagger's download functions — one place. `BuildRelease` produces all release assets (both arches, vendored tools, bashrc). CI workflows are thin callers that invoke Dagger and upload results.
+
+## Shared Code & Single Sources of Truth
+
+To avoid duplication between the devcontainer feature and the existing base image / container pipeline:
+
+| Asset | Single Source | Used By |
+|-------|-------------|---------|
+| Bashrc instrumentation | `base-images/bashrc` | Base image Dagger build, `BuildRelease` → `install.sh` |
+| Step application logic | `backend/setup/apply.go` | Backend activate handler, `cmd/workshop-setup` CLI |
+| Go cross-compile | `dagger/main.go` → `buildGoBinary()` | All four binary build functions |
+| Tool versions (ttyd, goss) | `dagger/main.go` → `downloadTtydArch()` / `downloadGossArch()` | Base image build, `BuildRelease` |
+| All release assets | `dagger/main.go` → `BuildRelease()` | `make build-release`, CI release workflow |
