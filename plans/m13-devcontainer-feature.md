@@ -1,5 +1,7 @@
 # M13 — DevContainer Feature
 
+> **Status note: IMPLEMENTED** (alongside [M14](./m14-standalone-mode.md)). Deviations from the plan as written: compile-to-directory lives in `pkg/workshop.CompileToDir()` (not `cmd/`); the canonical bashrc moved to `backend/instrumentation/workshop-platform.bashrc` (for `go:embed`); the feature metadata omits `forwardPorts`/`portsAttributes` (not valid feature properties per the devcontainers spec — authors set them in their own `devcontainer.json`, see `examples/hello-linux/.devcontainer/`); and `install.sh` bakes the `workshopPath`/`step` options into the generated `workshop-compile-and-setup` helper, since option env vars exist only at install time, not at runtime. Step 5's manual VS Code/Codespaces verification remains to be done after the first tagged release.
+
 ## Goal
 
 `ghcr.io/asocpro/workshop-builder/workshop:1` is a DevContainer Feature that installs the workshop platform into any devcontainer. Workshop authors add it to their `devcontainer.json`, open in VS Code or Codespaces, and get the full workshop UI at `localhost:8080` with step navigation, web terminal, and goss validation — no CLI or Docker knowledge required.
@@ -417,7 +419,7 @@ The frontend's "Next Step" action calls `/api/steps/{id}/activate` (in devcontai
 **New file: `devcontainer-feature/src/workshop/install.sh`**
 
 Key consolidation decisions:
-- **Bashrc**: Downloads the canonical `base-images/bashrc` from the GitHub release (asset: `workshop-platform.bashrc`). Single source of truth — no inline copy.
+- **Bashrc**: Downloads the canonical `backend/instrumentation/workshop-platform.bashrc` from the GitHub release (asset: `workshop-platform.bashrc`). Single source of truth — no inline copy.
 - **Tool binaries (ttyd, goss)**: Downloaded from the GitHub release as bundled assets (not from upstream). The release workflow downloads them once and attaches them. This eliminates hardcoded version constants in `install.sh` — one version tag controls everything.
 - **`workshop-setup`**: A Go binary (not a bash+python script). Uses the same `backend/setup` package as the backend's activate handler. No python3/jq dependency.
 
@@ -453,7 +455,7 @@ for BINARY in workshop-backend compile-workshop workshop-setup ttyd goss; do
 done
 
 # Install command logging instrumentation from the release.
-# Single source of truth: base-images/bashrc (same file used by base image pipeline).
+# Single source of truth: backend/instrumentation/workshop-platform.bashrc (same file used by base image pipeline).
 curl -fsSL "${GITHUB}/releases/download/${VERSION}/workshop-platform.bashrc" \
     -o /etc/workshop-platform.bashrc
 
@@ -683,8 +685,8 @@ func (m *WorkshopBuilder) BuildRelease(
         out = out.WithFile("goss-linux-"+arch, m.downloadGossArch(arch))
     }
 
-    // Bashrc — single source of truth is base-images/bashrc
-    out = out.WithFile("workshop-platform.bashrc", src.File("base-images/bashrc"))
+    // Bashrc — single source of truth is backend/instrumentation/workshop-platform.bashrc
+    out = out.WithFile("workshop-platform.bashrc", src.File("backend/instrumentation/workshop-platform.bashrc"))
 
     return out
 }
@@ -838,7 +840,7 @@ This milestone was designed to avoid duplicating logic that already exists in th
 
 | What | Single Source of Truth | Consumed By |
 |------|----------------------|-------------|
-| Bashrc (`workshop-platform.bashrc`) | `base-images/bashrc` | Dagger base image build, `BuildRelease` (copies to release dir), `install.sh` downloads from release |
+| Bashrc (`workshop-platform.bashrc`) | `backend/instrumentation/workshop-platform.bashrc` | Dagger base image build, `BuildRelease` (copies to release dir), `install.sh` downloads from release |
 | Tool versions (ttyd, goss) | `dagger/main.go` → `downloadTtydArch()` / `downloadGossArch()` | Base image build, `BuildRelease` (vendors into release dir) |
 | Step-application logic (copy files, run commands) | `backend/setup/apply.go` | `cmd/workshop-setup` CLI binary, `backend/handlers/activate.go` HTTP handler |
 | Go binary cross-compile boilerplate | `dagger/main.go` → `buildGoBinary()` | `BuildBackend`, `BuildCLI`, `BuildCompileWorkshop`, `BuildSetup` |
@@ -846,7 +848,7 @@ This milestone was designed to avoid duplicating logic that already exists in th
 
 **Dagger owns all build logic.** CI never downloads tools, compiles binaries, or makes version decisions. The release workflow is: `dagger call build-release` → `gh-release upload`.
 
-**Bashrc**: The feature's `install.sh` downloads `workshop-platform.bashrc` from the GitHub release. `BuildRelease` copies it from `base-images/bashrc`. Never inline a second copy.
+**Bashrc**: The feature's `install.sh` downloads `workshop-platform.bashrc` from the GitHub release. `BuildRelease` copies it from `backend/instrumentation/workshop-platform.bashrc`. Never inline a second copy.
 
 **Tool versions**: Pinned once in `dagger/main.go` (the `downloadTtydArch`/`downloadGossArch` functions). Both the base image pipeline and `BuildRelease` use the same functions. No version constants in CI or `install.sh`.
 

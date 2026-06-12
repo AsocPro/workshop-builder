@@ -1,0 +1,29 @@
+name: Release
+
+# Thin CI caller — all build logic lives in the Dagger module (BuildRelease).
+# `dagger call build-release` produces every asset; this workflow uploads them.
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all release assets via Dagger
+        uses: dagger/dagger-for-github@v7
+        with:
+          version: "latest"
+          verb: call
+          args: build-release --src . -o /tmp/release
+
+      - name: Create GitHub release with assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/release/*
+          generate_release_notes: true

@@ -1,0 +1,16 @@
+{
+    "name": "hello-linux workshop",
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "features": {
+        "ghcr.io/asocpro/workshop-builder/workshop:1": {
+            "workshopPath": "."
+        }
+    },
+    "forwardPorts": [8080],
+    "portsAttributes": {
+        "8080": {
+            "label": "Workshop UI",
+            "onAutoForward": "openBrowserOnce"
+        }
+    }
+}

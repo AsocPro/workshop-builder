@@ -1,0 +1,27 @@
+name: Publish DevContainer Feature
+
+# Publishes the feature as an OCI artifact to
+# ghcr.io/asocpro/workshop-builder/workshop via the standard devcontainers
+# action. This is the one release step that cannot move into Dagger (it
+# requires the devcontainers OCI manifest format).
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish feature to ghcr.io
+        uses: devcontainers/action@v1
+        with:
+          publish-features: "true"
+          base-path-to-features: devcontainer-feature/src
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

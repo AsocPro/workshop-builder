@@ -3,7 +3,8 @@ WORKSHOP_IMAGE   := localhost/hello-linux
 IMAGES_DIR       := /tmp/workshop-images
 BASE_IMAGES_DIR  := /tmp/base-images
 
-.PHONY: test build-backend base-images publish-base-images build-workshop build-cli tidy
+.PHONY: test build-backend base-images publish-base-images build-workshop build-cli tidy \
+	build-compile-workshop build-setup build-feature build-release
 
 test:
 	dagger call test --src .
@@ -61,3 +62,24 @@ build-cli:
 # Update go.mod and go.sum via Dagger (no local Go needed)
 tidy:
 	dagger call go-mod-tidy --src . -o .
+
+# Cross-compile compile-workshop for linux/amd64
+build-compile-workshop:
+	dagger call build-compile-workshop --src . -o compile-workshop
+	chmod +x compile-workshop
+
+# Cross-compile workshop-setup for linux/amd64
+build-setup:
+	dagger call build-setup --src . -o workshop-setup
+	chmod +x workshop-setup
+
+# Tarball the devcontainer feature
+build-feature:
+	dagger call build-feature --src . -o /tmp/workshop-feature.tgz
+	@tar tzf /tmp/workshop-feature.tgz
+
+# Build all release assets (both arches, vendored tools, bashrc, installer) —
+# the same set CI uploads to GitHub releases
+build-release:
+	dagger call build-release --src . -o /tmp/release
+	@ls -la /tmp/release

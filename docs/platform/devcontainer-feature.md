@@ -8,7 +8,7 @@ This is the **self-paced, async delivery mode**. It complements the existing con
 
 ## Why Not a Native Binary?
 
-A "passthrough mode" (binary on bare host) was evaluated and rejected:
+A "passthrough mode" (binary on bare host) was evaluated and rejected **as the self-paced student delivery mode**:
 
 - **Windows** — ttyd uses POSIX pty APIs (`forkpty`/`openpty`), no Windows builds exist. goss has no Windows support.
 - **Step transitions are destructive** on a real host — no undo, no clean state reset.
@@ -16,6 +16,8 @@ A "passthrough mode" (binary on bare host) was evaluated and rejected:
 - **WSL2** works but negates the value — you're already in Linux, might as well use containers.
 
 A DevContainer Feature sidesteps all of these: it runs inside a container (clean state, isolated, Linux), but the user works in their own IDE with their own keybindings, extensions, and terminal.
+
+These rejection reasons are specific to the student audience. For the single-operator, server-targeted use case — interactive runbooks on a machine the operator owns and intends to mutate — every one of them inverts. That mode exists separately: see [Standalone Mode](./standalone-mode.md).
 
 ## What the Feature Installs
 
@@ -30,7 +32,7 @@ The `install.sh` script downloads everything from a single GitHub release (one v
 | `goss` | Vendored from upstream in our release | Step validation |
 
 Plus:
-- `/etc/workshop-platform.bashrc` — command logging instrumentation, downloaded from the release (same file as `base-images/bashrc` — single source of truth)
+- `/etc/workshop-platform.bashrc` — command logging instrumentation, downloaded from the release (same file as `backend/instrumentation/workshop-platform.bashrc` — single source of truth)
 - `/workshop/runtime/` — pre-created runtime directory
 
 ## Feature Options
@@ -81,31 +83,35 @@ One-directional — to reset, rebuild the container. This matches the learning m
 
 ## Startup & Auto-Open
 
-The feature uses devcontainer lifecycle hooks:
+The feature contributes lifecycle hooks via its metadata:
 
 ```json
 {
   "containerEnv": {
     "WORKSHOP_MODE": "devcontainer"
   },
-  "forwardPorts": [8080],
-  "portsAttributes": {
-    "8080": {
-      "label": "Workshop UI",
-      "onAutoForward": "openBrowserOnce"
-    }
-  },
-  "postCreateCommand": "compile-workshop --workshop ${workshopPath} --output /workshop && workshop-setup --step ${step}",
-  "postStartCommand": "workshop-backend &"
+  "postCreateCommand": "workshop-compile-and-setup",
+  "postStartCommand": "nohup workshop-backend >/tmp/workshop-backend.log 2>&1 &"
 }
 ```
 
 | Hook | When | What |
 |------|------|------|
-| `postCreateCommand` | Once, on container creation | Compiles workshop content, applies setup up to specified step |
-| `postStartCommand` | Every container start (including reopens) | Launches backend in background |
-| `forwardPorts` | On port detection | VS Code forwards 8080 to host |
-| `portsAttributes` | On first start | Auto-opens browser to workshop UI |
+| `postCreateCommand` | Once, on container creation | Compiles workshop content, applies setup up to the configured step |
+| `postStartCommand` | Every container start (including reopens) | Launches backend in background (log at `/tmp/workshop-backend.log`) |
+
+Feature options (`workshopPath`, `step`) are only available as env vars while `install.sh` runs at build time, so the installer bakes them into the generated `workshop-compile-and-setup` helper rather than reading them at runtime.
+
+Port forwarding is **not** part of the feature — `forwardPorts`/`portsAttributes` are `devcontainer.json` properties, not feature metadata. VS Code auto-detects the listening port regardless; for the auto-open-browser behavior, authors add to their own `devcontainer.json`:
+
+```json
+{
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "Workshop UI", "onAutoForward": "openBrowserOnce" }
+  }
+}
+```
 
 In **GitHub Codespaces**, the same `portsAttributes` config works — Codespaces shows the forwarded port in the Ports tab.
 
@@ -202,7 +208,7 @@ For skip-ahead scenarios:
 
 ## Relationship to Other Components
 
-- **Base Images** — not used in devcontainer mode. The feature installs the same binaries but into whatever container the author specifies. The bashrc file is shared — `base-images/bashrc` is the single source of truth, included in GitHub releases for both the base image pipeline and the feature's `install.sh`.
+- **Base Images** — not used in devcontainer mode. The feature installs the same binaries but into whatever container the author specifies. The bashrc file is shared — `backend/instrumentation/workshop-platform.bashrc` is the single source of truth, included in GitHub releases for both the base image pipeline and the feature's `install.sh`.
 - **CLI** — not needed. The devcontainer lifecycle hooks handle startup. No step-transition container swaps.
 - **Backend** — same binary, different mode. `WORKSHOP_MODE=devcontainer` enables in-place transitions instead of requesting external swap. The step-application logic (`backend/setup/apply.go`) is shared between the backend's activate handler and the standalone `workshop-setup` CLI.
 - **Compile-Workshop** — enhanced with `--output-dir` to write the full `/workshop/` directory structure including `setup.json` and `stage/` per step.
@@ -214,7 +220,7 @@ To avoid duplication between the devcontainer feature and the existing base imag
 
 | Asset | Single Source | Used By |
 |-------|-------------|---------|
-| Bashrc instrumentation | `base-images/bashrc` | Base image Dagger build, `BuildRelease` → `install.sh` |
+| Bashrc instrumentation | `backend/instrumentation/workshop-platform.bashrc` | Base image Dagger build, `BuildRelease` → `install.sh` |
 | Step application logic | `backend/setup/apply.go` | Backend activate handler, `cmd/workshop-setup` CLI |
 | Go cross-compile | `dagger/main.go` → `buildGoBinary()` | All four binary build functions |
 | Tool versions (ttyd, goss) | `dagger/main.go` → `downloadTtydArch()` / `downloadGossArch()` | Base image build, `BuildRelease` |
