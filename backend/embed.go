@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-//go:embed frontend/dist
+// all: so the .gitkeep placeholder satisfies the pattern in source-only
+// builds (tests, go build); the Dagger pipeline overlays the real dist/.
+//
+//go:embed all:frontend/dist
 var frontendFS embed.FS
 
 // frontendHandler returns an HTTP handler serving embedded frontend assets.

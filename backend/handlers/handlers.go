@@ -13,14 +13,16 @@ type Handlers struct {
 	State         *store.State
 	ManagementURL string
 	CommandLog    *store.CommandLog
+	Mode          string // WORKSHOP_MODE: container (default), devcontainer, standalone
 }
 
-func New(meta *store.Metadata, st *store.State, managementURL string, cmdLog *store.CommandLog) *Handlers {
+func New(meta *store.Metadata, st *store.State, managementURL string, cmdLog *store.CommandLog, mode string) *Handlers {
 	return &Handlers{
 		Meta:          meta,
 		State:         st,
 		ManagementURL: managementURL,
 		CommandLog:    cmdLog,
+		Mode:          mode,
 	}
 }
 

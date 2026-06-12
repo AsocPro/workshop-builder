@@ -154,6 +154,11 @@ Cluster mode is baked into `workshop.json` at image build time, so the backend a
 
 - **Docker mode (single-user)**: No authentication. The backend is only accessible to whoever can reach the container's port — no login required.
 - **Cluster mode (multi-tenant)**: Authentication is handled externally via [OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) in front of the workspace ingress, integrated with [Authentik](https://goauthentik.io/) as the identity provider. The backend itself does not implement auth — it sits behind the proxy and trusts the network boundary.
+- **Standalone mode (server)**: Optional HTTP Basic auth implemented by the backend (`--auth-user`/`--auth-password-file`), gating every route including the terminal WebSocket. The browser handles the credential prompt — the frontend has no login UI. Private networks only; see [Standalone Mode](../platform/standalone-mode.md).
+
+## Step Switching: Navigate vs Activate
+
+`GET /api/state` reports `mode` and `inPlace`. When `inPlace` is true (devcontainer, standalone), step switching calls `POST /api/steps/:id/activate` — the backend applies the step's setup (staged files + commands) on first visit. In container mode it calls `POST /api/steps/:id/navigate`, which only changes the viewed step; environment changes happen externally via image swap. The UI is identical in both cases — the branch lives in the navigation handler.
 
 ## Responsive Design
 

@@ -50,6 +50,7 @@ Shared logic, orchestration, and runtime enforcement. This is the system that ac
 | [Infrastructure Provisioners](./platform/infrastructure-provisioners.md) | k3d, vcluster orchestration |
 | [Backend Capabilities](./platform/backend-capabilities.md) | Docker vs Kubernetes feature matrix |
 | [DevContainer Feature](./platform/devcontainer-feature.md) | IDE-native delivery mode — VS Code, Codespaces, DevPod |
+| [Standalone Mode](./platform/standalone-mode.md) | Interactive runbook delivery mode — backend directly on a server, single user, server state authoritative |
 
 The operator owns step transitions — these are image swaps: update Deployment spec → rollout → done. No namespace teardown or PVC restoration.
 
@@ -168,7 +169,7 @@ myorg/kubernetes-101:step-1-intro
 - A system that stores metadata in SQLite
 - A system with a separate distribution artifact
 - A system with an author-facing file for deployment/operator configuration
-- A system where workshops can be run with bare `docker run` — the CLI is always required
+- A system where container workshops can be run with bare `docker run` — the CLI is always required for container local mode (the [devcontainer](./platform/devcontainer-feature.md) and [standalone](./platform/standalone-mode.md) delivery modes have their own entry points and do not involve the CLI)
 
 ## Open Architectural Questions
 

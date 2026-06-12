@@ -180,6 +180,24 @@ The authoring and build pipeline. These produce the artifacts consumed by the ru
 
 ---
 
+## Phase D: Standalone Mode (COMPLETE)
+
+---
+
+### D1. Standalone Mode (`platform/standalone-mode.md`)
+
+- [x] Define the interactive-runbook delivery mode (backend directly on a server, no container).
+- [x] Define scope constraints — single user per server, server state authoritative, private networks only, Linux only, no reset.
+- [x] Re-scope the devcontainer doc's "Why Not a Native Binary?" rejection to the student audience.
+- [x] Define `--serve` (compile-on-serve from a checkout, `~/.workshop/<name>` root, infrastructure guard).
+- [x] Define scoped instrumentation (embedded bashrc, generated rcfile, `WORKSHOP_ROOT`-aware, nothing global).
+- [x] Define optional basic auth and loopback-default listen address.
+- [x] Define `service install`/`uninstall` self-installing systemd unit.
+- [x] Add standalone column to backend capabilities matrix.
+- [x] Implementation plan: [plans/m14-standalone-mode.md](../plans/m14-standalone-mode.md) — implemented (shared core + M14; release assets pending M13 pipeline).
+
+---
+
 ## Phase 3: Backend Runtime (Single-User Mode Core)
 
 ---
@@ -397,6 +415,7 @@ The authoring and build pipeline. These produce the artifacts consumed by the ru
 | A | Base Images + Instrumentation | base-images, instrumentation | Complete |
 | B | Instructor Monitoring + LLM | instructor-dashboard, llm-help | Complete |
 | C | Aggregation (K8s) | aggregation | Complete |
+| D | Standalone Mode | standalone-mode | Complete (docs + implementation) |
 | 3 | Backend Runtime | backend-service | Mostly complete — capability flag + cluster health endpoint TBD |
 | 4 | Student UI | frontend | Core decisions complete — LLM panel + nav UI design TBD |
 | 5 | CLI — Local Mode | cli (local) | Partially complete — extraContainers lifecycle + port mapping + command tree TBD |

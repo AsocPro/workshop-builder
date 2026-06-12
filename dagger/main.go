@@ -24,21 +24,51 @@ func (m *WorkshopBuilder) Test(
 		WithMountedCache("/root/.cache/go-build", dag.CacheVolume("go-build")).
 		WithDirectory("/src", src).
 		WithWorkdir("/src").
+		WithExec([]string{"go", "build", "./..."}).
 		WithExec([]string{"go", "test", "-v", "./pkg/workshop/...", "./backend/..."}).
 		Stdout(ctx)
 }
 
-// ── BuildBackend ──────────────────────────────────────────────────────────────
+// ── Go Binary Builds ──────────────────────────────────────────────────────────
 
-// BuildBackend builds the frontend then cross-compiles the backend binary
-// (linux/amd64, no CGO) with frontend assets embedded.
-func (m *WorkshopBuilder) BuildBackend(
-	ctx context.Context,
-	// +defaultPath="/"
+// buildGoBinary cross-compiles a Go binary from the given package path.
+// All Go binary builds go through this single function — Go version, cache
+// volumes, and ldflags change in one place.
+func (m *WorkshopBuilder) buildGoBinary(
 	src *dagger.Directory,
+	pkg string, // e.g. "./cli/", "./cmd/compile-workshop/"
+	outputName string,
+	targetOS string,
+	targetArch string,
 ) *dagger.File {
-	// Step 1: Build frontend
-	frontendDist := dag.Container().
+	if targetOS == "" {
+		targetOS = "linux"
+	}
+	if targetArch == "" {
+		targetArch = "amd64"
+	}
+	return dag.Container().
+		From("golang:1.24-alpine").
+		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod")).
+		WithMountedCache("/root/.cache/go-build", dag.CacheVolume("go-build")).
+		WithDirectory("/src", src).
+		WithWorkdir("/src").
+		WithEnvVariable("CGO_ENABLED", "0").
+		WithEnvVariable("GOOS", targetOS).
+		WithEnvVariable("GOARCH", targetArch).
+		WithExec([]string{"go", "mod", "download"}).
+		WithExec([]string{
+			"go", "build",
+			"-ldflags", "-s -w",
+			"-o", "/out/" + outputName,
+			pkg,
+		}).
+		File("/out/" + outputName)
+}
+
+// buildFrontendDist builds the Svelte frontend and returns the dist directory.
+func (m *WorkshopBuilder) buildFrontendDist(src *dagger.Directory) *dagger.Directory {
+	return dag.Container().
 		From("node:22-alpine").
 		WithMountedCache("/root/.npm", dag.CacheVolume("npm-cache")).
 		WithDirectory("/app", src.Directory("frontend")).
@@ -46,27 +76,60 @@ func (m *WorkshopBuilder) BuildBackend(
 		WithExec([]string{"npm", "ci"}).
 		WithExec([]string{"npm", "run", "build"}).
 		Directory("/app/dist")
+}
 
-	// Step 2: Inject dist/ into Go source tree at backend/frontend/dist/
-	srcWithDist := src.WithDirectory("backend/frontend/dist", frontendDist)
+// BuildBackend builds the frontend then cross-compiles the backend binary
+// (no CGO) with frontend assets embedded.
+func (m *WorkshopBuilder) BuildBackend(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+	// Target OS (default: linux)
+	// +optional
+	// +default="linux"
+	targetOS string,
+	// Target arch (default: amd64)
+	// +optional
+	// +default="amd64"
+	targetArch string,
+) *dagger.File {
+	srcWithDist := src.WithDirectory("backend/frontend/dist", m.buildFrontendDist(src))
+	return m.buildGoBinary(srcWithDist, "./backend/", "workshop-backend", targetOS, targetArch)
+}
 
-	// Step 3: Compile backend (CGO disabled, linux/amd64)
-	return dag.Container().
-		From("golang:1.24-alpine").
-		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod")).
-		WithMountedCache("/root/.cache/go-build", dag.CacheVolume("go-build")).
-		WithDirectory("/src", srcWithDist).
-		WithWorkdir("/src").
-		WithEnvVariable("CGO_ENABLED", "0").
-		WithEnvVariable("GOOS", "linux").
-		WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{
-			"go", "build",
-			"-ldflags", "-s -w",
-			"-o", "/out/workshop-backend",
-			"./backend/",
-		}).
-		File("/out/workshop-backend")
+// BuildCompileWorkshop cross-compiles the compile-workshop binary.
+func (m *WorkshopBuilder) BuildCompileWorkshop(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+	// Target OS (default: linux)
+	// +optional
+	// +default="linux"
+	targetOS string,
+	// Target arch (default: amd64)
+	// +optional
+	// +default="amd64"
+	targetArch string,
+) *dagger.File {
+	return m.buildGoBinary(src, "./cmd/compile-workshop/", "compile-workshop", targetOS, targetArch)
+}
+
+// BuildSetup cross-compiles the workshop-setup binary (in-place step setup,
+// shared logic with the backend's activate handler).
+func (m *WorkshopBuilder) BuildSetup(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+	// Target OS (default: linux)
+	// +optional
+	// +default="linux"
+	targetOS string,
+	// Target arch (default: amd64)
+	// +optional
+	// +default="amd64"
+	targetArch string,
+) *dagger.File {
+	return m.buildGoBinary(src, "./cmd/workshop-setup/", "workshop-setup", targetOS, targetArch)
 }
 
 // ── BuildBaseImages ───────────────────────────────────────────────────────────
@@ -81,7 +144,7 @@ func (m *WorkshopBuilder) BuildBaseImages(
 	// +defaultPath="/"
 	src *dagger.Directory,
 ) (*dagger.Directory, error) {
-	backendBin := m.BuildBackend(ctx, src)
+	backendBin := m.BuildBackend(ctx, src, "", "")
 	out := dag.Directory()
 	for _, variant := range []string{"ubuntu", "rocky", "debian"} {
 		img, err := m.buildBaseImage(ctx, src, variant, backendBin)
@@ -111,7 +174,7 @@ func (m *WorkshopBuilder) PublishBaseImages(
 	if repo == "" {
 		repo = "ghcr.io/asocpro/workshop-base"
 	}
-	backendBin := m.BuildBackend(ctx, src)
+	backendBin := m.BuildBackend(ctx, src, "", "")
 	for _, variant := range []string{"ubuntu", "rocky", "debian"} {
 		img, err := m.buildBaseImage(ctx, src, variant, backendBin)
 		if err != nil {
@@ -136,7 +199,7 @@ func (m *WorkshopBuilder) buildBaseImage(
 	tini := m.downloadTini(ctx)
 	goss := m.downloadGoss(ctx)
 	ttyd := m.downloadTtyd(ctx)
-	bashrc := src.File("base-images/bashrc")
+	bashrc := src.File("backend/instrumentation/workshop-platform.bashrc")
 
 	switch variant {
 	case "ubuntu":
@@ -237,7 +300,7 @@ func (m *WorkshopBuilder) BuildWorkshop(
 	}
 
 	// Build backend binary (includes embedded frontend)
-	backendBin := m.BuildBackend(ctx, src)
+	backendBin := m.BuildBackend(ctx, src, "", "")
 
 	// Resolve base container for this workshop
 	base, err := m.resolveBaseContainer(ctx, src, compileOut.BaseImage, backendBin)
@@ -628,15 +691,76 @@ func (m *WorkshopBuilder) FrontendLockfile(
 }
 
 // ── Tool Downloads ─────────────────────────────────────────────────────────────
+// Vendored tool versions are pinned here and nowhere else. The base image
+// pipeline and BuildRelease both go through these functions.
 
 func (m *WorkshopBuilder) downloadTini(_ context.Context) *dagger.File {
 	return dag.HTTP("https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64")
 }
 
 func (m *WorkshopBuilder) downloadGoss(_ context.Context) *dagger.File {
-	return dag.HTTP("https://github.com/goss-org/goss/releases/download/v0.4.9/goss-linux-amd64")
+	return m.downloadGossArch("amd64")
 }
 
 func (m *WorkshopBuilder) downloadTtyd(_ context.Context) *dagger.File {
-	return dag.HTTP("https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64")
+	return m.downloadTtydArch("amd64")
+}
+
+func (m *WorkshopBuilder) downloadGossArch(arch string) *dagger.File {
+	return dag.HTTP("https://github.com/goss-org/goss/releases/download/v0.4.9/goss-linux-" + arch)
+}
+
+func (m *WorkshopBuilder) downloadTtydArch(arch string) *dagger.File {
+	ttydArch := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]
+	return dag.HTTP("https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd." + ttydArch)
+}
+
+// ── Release ───────────────────────────────────────────────────────────────────
+
+// BuildRelease builds all release assets for both architectures: our Go
+// binaries, vendored tools (ttyd, goss), the canonical bashrc, and the
+// standalone installer script. The CI release workflow is a thin caller —
+// `dagger call build-release` → upload to a GitHub release. One version tag
+// pins everything.
+//
+//	dagger call build-release --src . -o /tmp/release
+func (m *WorkshopBuilder) BuildRelease(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+) *dagger.Directory {
+	out := dag.Directory()
+
+	for _, arch := range []string{"amd64", "arm64"} {
+		out = out.
+			WithFile("workshop-backend-linux-"+arch, m.BuildBackend(ctx, src, "linux", arch)).
+			WithFile("compile-workshop-linux-"+arch, m.BuildCompileWorkshop(ctx, src, "linux", arch)).
+			WithFile("workshop-setup-linux-"+arch, m.BuildSetup(ctx, src, "linux", arch)).
+			WithFile("workshop-cli-linux-"+arch, m.BuildCLI(ctx, src, "linux", arch)).
+			WithFile("ttyd-linux-"+arch, m.downloadTtydArch(arch)).
+			WithFile("goss-linux-"+arch, m.downloadGossArch(arch))
+	}
+
+	return out.
+		WithFile("workshop-platform.bashrc", src.File("backend/instrumentation/workshop-platform.bashrc")).
+		WithFile("install-standalone.sh", src.File("scripts/install-standalone.sh"))
+}
+
+// BuildFeature tarballs the devcontainer feature directory in the format
+// expected by the devcontainers spec (devcontainer-feature.json + install.sh
+// at the tarball root).
+//
+//	dagger call build-feature --src . -o /tmp/workshop-feature.tgz
+func (m *WorkshopBuilder) BuildFeature(
+	ctx context.Context,
+	// +defaultPath="/"
+	src *dagger.Directory,
+) *dagger.File {
+	return dag.Container().
+		From("alpine:3.21").
+		WithDirectory("/feature", src.Directory("devcontainer-feature/src/workshop")).
+		WithWorkdir("/feature").
+		WithExec([]string{"mkdir", "-p", "/out"}).
+		WithExec([]string{"tar", "czf", "/out/workshop-feature.tgz", "."}).
+		File("/out/workshop-feature.tgz")
 }

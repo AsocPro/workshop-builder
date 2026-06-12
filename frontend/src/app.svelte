@@ -25,7 +25,13 @@
 
   async function onNavigate(stepId: string) {
     try {
-      await api.navigate(stepId)
+      // In-place modes (devcontainer, standalone) apply the step's setup on
+      // first visit; container modes only switch the viewed step.
+      if (state?.inPlace) {
+        await api.activate(stepId)
+      } else {
+        await api.navigate(stepId)
+      }
       activeStepId = stepId
     } catch (e) {
       console.error('navigate error:', e)

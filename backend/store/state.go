@@ -8,6 +8,7 @@ type State struct {
 	meta         *Metadata
 	activeStepID string
 	completed    map[string]bool // set of completed step IDs
+	applied      map[string]bool // steps whose in-place setup has run (devcontainer/standalone)
 }
 
 // NewState creates fresh state with the first accessible step active.
@@ -15,6 +16,7 @@ func NewState(meta *Metadata) *State {
 	s := &State{
 		meta:      meta,
 		completed: make(map[string]bool),
+		applied:   make(map[string]bool),
 	}
 	if len(meta.Steps) > 0 {
 		s.activeStepID = meta.Steps[0].ID
@@ -59,6 +61,21 @@ func (s *State) CompletedSteps() []string {
 		result = append(result, id)
 	}
 	return result
+}
+
+// IsStepApplied returns whether a step's in-place setup has already run.
+func (s *State) IsStepApplied(stepID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.applied[stepID]
+}
+
+// MarkStepApplied records that a step's in-place setup has run, preventing
+// re-application on revisit.
+func (s *State) MarkStepApplied(stepID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.applied[stepID] = true
 }
 
 // Accessible returns whether a step can be navigated to under the current nav mode.

@@ -13,20 +13,31 @@ Both are pre-installed in [base images](./base-images.md) and require no author 
 
 ### Shell Hook: `/etc/workshop-platform.bashrc`
 
+The canonical source is `backend/instrumentation/workshop-platform.bashrc` — embedded in the backend binary (standalone mode), installed by the Dagger base image pipeline (container modes), and shipped in GitHub releases (devcontainer feature).
+
 ```bash
-__workshop_log_cmd() {
+__workshop_log_command() {
     local exit_code=$?
-    local ts=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-    local cmd=$(HISTTIMEFORMAT= history 1 | sed 's/^ *[0-9]* *//')
-    [ -z "$cmd" ] && return
-    printf '{"ts":"%s","cmd":"%s","exit":%d}\n' \
-        "$ts" \
-        "$(printf '%s' "$cmd" | head -c 1024 | sed 's/\\/\\\\/g; s/"/\\"/g')" \
-        "$exit_code" \
-        >> /workshop/runtime/command-log.jsonl
+    local runtime_dir="${WORKSHOP_ROOT:-/workshop}/runtime"
+    local cmd
+    cmd=$(history 1 | sed 's/^[ ]*[0-9]*[ ]*//')
+    if [ -n "$cmd" ] && [ -d "$runtime_dir" ]; then
+        local escaped_cmd
+        escaped_cmd=$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g')
+        printf '{"ts":"%s","cmd":"%s","exit":%d}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "$escaped_cmd" \
+            "$exit_code" \
+            >> "$runtime_dir/command-log.jsonl" 2>/dev/null || true
+    fi
+    return $exit_code
 }
-PROMPT_COMMAND="__workshop_log_cmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+
+PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__workshop_log_command"
+export PROMPT_COMMAND
 ```
+
+The log path honors `WORKSHOP_ROOT` (default `/workshop`), so the same hook works in containers and in standalone mode, where the root lives under the operator's home directory.
 
 ### How It Works
 
@@ -60,13 +71,15 @@ PROMPT_COMMAND="__workshop_log_cmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
 
 ### Sourcing
 
-The bashrc is sourced automatically for interactive bash sessions via `/etc/bash.bashrc` (added during base image build):
+**Container modes:** sourced automatically for interactive bash sessions via `/etc/bash.bashrc` (added during base image build) — global sourcing is fine inside a container that exists only for the workshop:
 
 ```bash
 [ -f /etc/workshop-platform.bashrc ] && . /etc/workshop-platform.bashrc
 ```
 
 Non-interactive shells (scripts, cron jobs) do not source it — only terminal sessions are instrumented.
+
+**Standalone mode:** nothing global is touched. The backend writes the embedded hook into a generated rcfile under `WORKSHOP_ROOT` (chaining the operator's own `~/.bashrc` first) and launches the ttyd shell with `bash --rcfile`. Only terminals opened through the workshop UI are logged — SSH sessions, cron, and every other shell on the server are untouched. See [Standalone Mode](./standalone-mode.md).
 
 ## Asciinema Recording
 

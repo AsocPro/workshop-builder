@@ -9,10 +9,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/asocpro/workshop-builder/backend/handlers"
+	"github.com/asocpro/workshop-builder/backend/setup"
 	"github.com/asocpro/workshop-builder/backend/store"
 )
 
-func NewServer(meta *store.Metadata, st *store.State, managementURL string, cmdLog *store.CommandLog) http.Handler {
+func NewServer(meta *store.Metadata, st *store.State, managementURL string, cmdLog *store.CommandLog, mode string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -31,13 +32,16 @@ func NewServer(meta *store.Metadata, st *store.State, managementURL string, cmdL
 		})
 	})
 
-	h := handlers.New(meta, st, managementURL, cmdLog)
+	h := handlers.New(meta, st, managementURL, cmdLog, mode)
 
 	// Student API
 	r.Get("/api/state", h.GetState)
 	r.Get("/api/steps", h.ListSteps)
 	r.Get("/api/steps/{id}/content", h.GetStepContent)
 	r.Post("/api/steps/{id}/navigate", h.Navigate)
+	if setup.InPlaceMode(mode) {
+		r.Post("/api/steps/{id}/activate", h.Activate)
+	}
 	r.Post("/api/steps/{id}/validate", h.Validate)
 	r.Get("/api/commands", h.ListCommands)
 	r.Get("/api/recordings", h.ListRecordings)

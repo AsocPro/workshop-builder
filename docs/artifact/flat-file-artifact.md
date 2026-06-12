@@ -45,15 +45,22 @@ The author writes YAML (`workshop.yaml`, per-step `step.yaml`). The build pipeli
   │   │   ├── explain.md                # static explanation content (optional)
   │   │   ├── solve.md                  # static solution content (optional)
   │   │   ├── llm.json                  # LLM config (optional)
-  │   │   └── llm-docs/                 # reference docs for LLM context (optional)
-  │   │       ├── kubectl-cheatsheet.md
-  │   │       └── ...
+  │   │   ├── llm-docs/                 # reference docs for LLM context (optional)
+  │   │   │   ├── kubectl-cheatsheet.md
+  │   │   │   └── ...
+  │   │   ├── setup.json                # in-place step setup: files, commands, env
+  │   │   └── stage/                    # staged copies of the step's files
+  │   │       └── deployment.yaml       #   (copied to targets on activation)
   │   ├── step-services/
   │   │   ├── meta.json
   │   │   ├── content.md
   │   │   └── goss.yaml
   │   └── ...
 ```
+
+`setup.json` and `stage/` are written by `compile-workshop --output-dir` (equivalently `pkg/workshop.CompileToDir()`) and consumed by **in-place modes** ([devcontainer](../platform/devcontainer-feature.md), [standalone](../platform/standalone-mode.md)), where step transitions apply setup inside the running environment instead of swapping containers. In container mode the same information is applied at image build time by the Dagger pipeline, so these files are not baked into OCI images. `setup.json` is always written, even when empty, so runtime logic stays unconditional.
+
+In standalone mode the root is not `/workshop` but `WORKSHOP_ROOT` (default `~/.workshop/<name>/`), and the root additionally contains a generated `workshop-rcfile` for scoped terminal instrumentation. Recompiling on restart replaces `workshop.json` and `steps/` but never touches `runtime/`.
 
 ### Runtime Data (`/workshop/runtime/` — ephemeral)
 
@@ -192,6 +199,32 @@ Static help content at `/workshop/steps/<id>/hints.md`, `explain.md`, and `solve
 ## Schema: goss.yaml
 
 Goss validation spec at `/workshop/steps/<id>/goss.yaml`. Copied directly from the step's `goss.yaml` source file at build time. Present only for steps that have a `goss.yaml` in their step directory.
+
+## Schema: setup.json
+
+In-place step setup at `/workshop/steps/<id>/setup.json` — present only in compiled-to-directory layouts (devcontainer and standalone modes), not in OCI images.
+
+```json
+{
+  "files": [
+    { "source": "deployment.yaml", "target": "/workspace/deployment.yaml", "mode": "0644" }
+  ],
+  "commands": [
+    "kubectl apply -f /workspace/deployment.yaml"
+  ],
+  "env": {
+    "KUBECONFIG": "/etc/rancher/k3s/k3s.yaml"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `files` | array | Staged-file copies applied on activation. `source` is relative to the step's `stage/` directory; `target` is absolute; `mode` is an optional octal string (default `0644`) |
+| `commands` | array | Shell commands run via `sh -c`, in order, after files are copied |
+| `env` | object | Environment variables appended to the command environment |
+
+All three fields are always present (empty arrays/object when unused). Compiled from the step's `step.yaml` `files:`/`commands:`/`env:` blocks — the same blocks the Dagger pipeline applies at image build time in container mode. Applied by `backend/setup.Apply()`, shared between the backend's activate handler and the `workshop-setup` CLI.
 
 ## Schema: llm.json
 

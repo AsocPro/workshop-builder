@@ -31,6 +31,20 @@ tini (PID 1)
         └── Supervise ttyd/asciinema (restart on exit)
 ```
 
+## Modes
+
+The backend runs in one of three modes, selected by `WORKSHOP_MODE` (default `container`):
+
+| Mode | Set By | Step Transitions |
+|---|---|---|
+| `container` | default | External swap — [CLI](./cli.md) (local) or [Operator](./operator.md) (cluster); backend has no transition API |
+| `devcontainer` | devcontainer feature `containerEnv` | In-place — `POST /api/steps/:id/activate` applies `setup.json` |
+| `standalone` | `--serve` flag | In-place — same activate path; see [Standalone Mode](./standalone-mode.md) |
+
+Handlers branch on the **in-place capability** (`setup.InPlaceMode()`), never on raw mode strings. In in-place modes the activate route is registered and applies the step's `setup.json` (staged file copies + commands) on first visit, tracked by a per-step applied flag. `GET /api/state` reports `mode` and `inPlace` so the frontend can choose between navigate (view-only) and activate.
+
+Standalone mode additionally accepts `--listen`, `--auth-user`, and `--auth-password-file` flags (basic auth wrapping every route including the terminal WebSocket), and `workshop-backend service install` generates a systemd unit for persistent deployment.
+
 ## Responsibilities
 
 ### Flat File Metadata (Read-Only)
@@ -140,8 +154,10 @@ The backend instruments the WebSocket proxy for terminal connections:
 |---|---|---|
 | `GET` | `/api/steps` | List all steps with titles, groups, completion status, accessibility |
 | `GET` | `/api/steps/:id/content` | Get step tutorial markdown |
+| `POST` | `/api/steps/:id/navigate` | Set the viewed step (no environment change) |
+| `POST` | `/api/steps/:id/activate` | In-place modes only: apply `setup.json` (first visit) and set active step |
 | `POST` | `/api/steps/:id/validate` | Run goss validation, return results |
-| `GET` | `/api/state` | Current state: active step, completed set, navigation mode |
+| `GET` | `/api/state` | Current state: active step, completed set, navigation mode, mode + inPlace flags |
 | `GET` | `/api/commands` | Recent command history (with pagination) |
 | `GET` | `/api/recordings` | List session recording files with start timestamps |
 | `GET` | `/api/recordings/:filename` | Serve a session cast file with HTTP Range support |

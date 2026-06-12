@@ -43,6 +43,7 @@ type StepOutput struct {
 
 func main() {
 	workshopPath := flag.String("workshop", "", "path to workshop directory (relative to repo root or absolute)")
+	outputDir := flag.String("output-dir", "", "write the compiled flat-file layout to this directory (default: print JSON to stdout)")
 	flag.Parse()
 
 	if *workshopPath == "" {
@@ -52,6 +53,13 @@ func main() {
 	abs, err := filepath.Abs(*workshopPath)
 	if err != nil {
 		log.Fatalf("resolving path: %v", err)
+	}
+
+	if *outputDir != "" {
+		if _, err := workshop.CompileToDir(abs, *outputDir); err != nil {
+			log.Fatalf("compiling workshop: %v", err)
+		}
+		return
 	}
 
 	loaded, err := workshop.Parse(abs)

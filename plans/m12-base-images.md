@@ -70,7 +70,7 @@ integrated into the main `dagger/main.go` module (no separate module).
 
 ---
 
-## `base-images/bashrc`
+## `backend/instrumentation/workshop-platform.bashrc`
 
 ```bash
 # Workshop Platform Shell Instrumentation
@@ -192,7 +192,7 @@ func (m *WorkshopBuilder) buildBaseImage(
     tini := m.downloadTini(ctx)
     goss := m.downloadGoss(ctx)
     ttyd := m.downloadTtyd(ctx)
-    bashrc := src.File("base-images/bashrc")
+    bashrc := src.File("backend/instrumentation/workshop-platform.bashrc")
 
     switch variant {
     case "ubuntu":

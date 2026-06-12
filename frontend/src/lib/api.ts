@@ -3,6 +3,8 @@ export interface WorkshopState {
   completedSteps: string[]
   navigationMode: 'linear' | 'free' | 'guided'
   managementURL?: string
+  mode: 'container' | 'devcontainer' | 'standalone'
+  inPlace: boolean
 }
 
 export interface StepListItem {
@@ -62,6 +64,10 @@ export const api = {
 
   navigate(id: string): Promise<{ activeStep: string }> {
     return fetchJSON(`/api/steps/${id}/navigate`, { method: 'POST' })
+  },
+
+  activate(id: string): Promise<{ activeStep: string; setup: 'applied' | 'already_applied' }> {
+    return fetchJSON(`/api/steps/${id}/activate`, { method: 'POST' })
   },
 
   validate(id: string): Promise<ValidateResult> {
