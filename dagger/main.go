@@ -407,8 +407,8 @@ func (m *WorkshopBuilder) buildStepImage(
 		ctr = ctr.WithEnvVariable(k, v)
 	}
 
-	// Entrypoint: tini wraps the backend; CMD is the backend so callers can
-	// override it (e.g. "cat /file") while still going through tini.
+	// Entrypoint: tini wraps the workshop binary; CMD is that binary so callers
+	// can override it (e.g. "cat /file") while still going through tini.
 	ctr = ctr.
 		WithEntrypoint([]string{"/sbin/tini", "--"}).
 		WithDefaultArgs([]string{"/usr/local/bin/workshop"})
