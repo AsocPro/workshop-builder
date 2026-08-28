@@ -1,0 +1,34 @@
+{
+    "id": "workshop",
+    "version": "1.0.0",
+    "name": "Workshop Platform",
+    "description": "Adds workshop-builder platform tools: step UI, web terminal, goss validation. Serves the workshop at port 8080.",
+    "documentationURL": "https://github.com/asocpro/workshop-builder",
+    "options": {
+        "workshopPath": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the workshop directory (containing workshop.yaml), relative to the workspace root"
+        },
+        "step": {
+            "type": "string",
+            "default": "",
+            "description": "Step ID to start at. All prior steps have their setup (files + commands) pre-applied. Empty = start at step 1."
+        },
+        "version": {
+            "type": "string",
+            "default": "latest",
+            "description": "Version of workshop platform tools to install (GitHub release tag)"
+        }
+    },
+    "containerEnv": {
+        "WORKSHOP_MODE": "devcontainer"
+    },
+    "postCreateCommand": "workshop-compile-and-setup",
+    "postStartCommand": "nohup workshop >/tmp/workshop.log 2>&1 &",
+    "customizations": {
+        "vscode": {
+            "settings": {}
+        }
+    }
+}

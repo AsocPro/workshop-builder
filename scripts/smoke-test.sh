@@ -26,7 +26,7 @@ check "step-1-intro/content.md exists"         podman run --rm "$STEP1" test -f 
 check "step-1-intro/hints.md exists"           podman run --rm "$STEP1" test -f /workshop/steps/step-1-intro/hints.md
 check "step-2-files/goss.yaml exists"          podman run --rm "$STEP1" test -f /workshop/steps/step-2-files/goss.yaml
 check "step-3-validate/goss.yaml exists"       podman run --rm "$STEP1" test -f /workshop/steps/step-3-validate/goss.yaml
-check "workshop-backend binary exists"         podman run --rm "$STEP1" test -x /usr/local/bin/workshop-backend
+check "workshop binary exists"                 podman run --rm "$STEP1" test -x /usr/local/bin/workshop
 check "goss binary exists"                     podman run --rm "$STEP1" test -x /usr/local/bin/goss
 check "tini binary exists"                     podman run --rm "$STEP1" test -x /sbin/tini
 

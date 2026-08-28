@@ -6,12 +6,11 @@
 # Unlike the devcontainer feature's install.sh, this script:
 #   - does NOT touch /etc/bash.bashrc or install a global bashrc — the backend
 #     embeds the instrumentation and scopes it to workshop terminal sessions
-#   - does NOT create /workshop — `workshop-backend --serve` resolves its own
+#   - does NOT create /workshop — `workshop serve` resolves its own
 #     root under ~/.workshop/<name>
 #
 # The script's only job is fetching binaries. Everything else the binary sets
-# up on its own. Set WITH_COMPILE=1 to also install compile-workshop (for
-# pre-compiling or CI validation; --serve embeds compilation).
+# up on its own.
 set -eu
 
 VERSION="${VERSION:-latest}"
@@ -36,10 +35,7 @@ if [ "$VERSION" = "latest" ]; then
         | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
 fi
 
-BINARIES="workshop-backend workshop-setup ttyd goss"
-if [ "${WITH_COMPILE:-0}" = "1" ]; then
-    BINARIES="$BINARIES compile-workshop"
-fi
+BINARIES="workshop ttyd goss"
 
 echo "Installing workshop standalone tools ${VERSION} (${ARCH}) to ${PREFIX}..."
 for BINARY in $BINARIES; do
@@ -53,12 +49,12 @@ cat <<'EOF'
 
 Installed. To serve a workshop from a checkout:
 
-    workshop-backend --serve ./my-workshop
+    workshop serve ./my-workshop
     # then open http://localhost:8080 (or SSH port-forward from your machine)
 
 To run persistently as a systemd service:
 
-    workshop-backend service install --serve /opt/my-workshop \
+    workshop service install --serve /opt/my-workshop \
         --listen 0.0.0.0:8080 --auth-user admin --auth-password-file /etc/workshop/pass
 
 Private networks only — see docs/platform/standalone-mode.md.
