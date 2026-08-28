@@ -1,3 +1,5 @@
 backend/frontend/dist/
 !backend/frontend/dist/.gitkeep
-workshop
+# The root-level built binary only — anchored so it doesn't also ignore
+# source dirs named "workshop" (pkg/workshop, cmd/workshop).
+/workshop
