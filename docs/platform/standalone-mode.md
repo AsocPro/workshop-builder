@@ -45,10 +45,10 @@ The passthrough rejection stands for self-paced student delivery. Standalone mod
 
 ```bash
 git clone git@internal:platform/onboarding-workshop
-workshop-backend --serve ./onboarding-workshop
+workshop serve ./onboarding-workshop
 ```
 
-4. `--serve` compiles `workshop.yaml` to a runtime directory (invoking the same logic as `compile-workshop --output-dir`), then starts the backend against it
+4. `workshop serve` compiles `workshop.yaml` to a runtime directory (invoking the same logic as `workshop compile --output-dir`), then starts the backend against it
 5. The operator opens the UI — via SSH port-forward, or directly on the private network
 6. Steps render content, the embedded terminal is a shell on the real server, Validate runs goss against the real environment
 
@@ -60,14 +60,13 @@ The same single-version release bundle as the [devcontainer feature](./devcontai
 
 | Component | Purpose |
 |---|---|
-| `workshop-backend` | Serves UI, API, proxies terminal, compiles on `--serve` |
-| `workshop-setup` | Pre-applies setup for skip-ahead (optional) |
+| `workshop` | Single binary: `serve` (UI, API, proxies terminal, compiles on demand), `setup` (pre-applies setup for skip-ahead, optional), `compile`, `service`, `run` |
 | `ttyd` | Terminal-over-HTTP |
 | `goss` | Step validation against the live host |
 
-`compile-workshop` is not separately required — `--serve` embeds compilation — but is available for pre-compiling or CI validation of workshop content.
+`workshop compile` is not separately required — `workshop serve` embeds compilation — but is available for pre-compiling or CI validation of workshop content.
 
-The command-logging bashrc is not installed at all: it is embedded in the `workshop-backend` binary via `go:embed` (same single source of truth as the base images and the devcontainer feature) and written as an rcfile under `WORKSHOP_ROOT` on `--serve`. The installer's only real job is fetching the binaries; everything else — instrumentation rcfile, runtime directory, systemd unit — the binary sets up on its own, with no root required for the ad-hoc flow.
+The command-logging bashrc is not installed at all: it is embedded in the `workshop` binary via `go:embed` (same single source of truth as the base images and the devcontainer feature) and written as an rcfile under `WORKSHOP_ROOT` on `workshop serve`. The installer's only real job is fetching the binary; everything else — instrumentation rcfile, runtime directory, systemd unit — the binary sets up on its own, with no root required for the ad-hoc flow.
 
 ### Instrumentation Is Scoped to Workshop Sessions
 
@@ -81,7 +80,7 @@ SSH sessions, cron, and every other shell on the server are untouched. Only term
 
 ## Backend: Standalone Mode
 
-`WORKSHOP_MODE=standalone` (set by `--serve`). Behavior is the in-place transition model shared with devcontainer mode, plus server-appropriate adjustments:
+`WORKSHOP_MODE=standalone` (set by `workshop serve`). Behavior is the in-place transition model shared with devcontainer mode, plus server-appropriate adjustments:
 
 - **No management URL** — nothing manages containers; there are no containers
 - **Step activation** — in-place setup (`setup.json`: copy staged files, run commands), identical code path to devcontainer mode. Steps with no setup (the common case for runbooks) simply update the active step
@@ -94,7 +93,7 @@ SSH sessions, cron, and every other shell on the server are untouched. Only term
 Optional, for the network-exposed variant:
 
 ```bash
-workshop-backend --serve ./onboarding-workshop \
+workshop serve ./onboarding-workshop \
   --listen 0.0.0.0:8080 \
   --auth-user admin --auth-password-file ./pass
 ```
@@ -122,7 +121,7 @@ The operator runs the backend on demand from a checkout, accesses it via SSH por
 For a long-lived "this server's docs live at :8080" setup, the binary installs itself as a systemd service — no hand-written unit files:
 
 ```bash
-workshop-backend service install \
+workshop service install \
   --serve /opt/onboarding-workshop \
   --listen 0.0.0.0:8080 \
   --auth-user admin --auth-password-file /etc/workshop/pass
@@ -145,7 +144,7 @@ Description=Workshop runbook (onboarding-workshop)
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/workshop-backend --serve /opt/onboarding-workshop --listen 0.0.0.0:8080 --auth-user admin --auth-password-file /etc/workshop/pass
+ExecStart=/usr/local/bin/workshop serve /opt/onboarding-workshop --listen 0.0.0.0:8080 --auth-user admin --auth-password-file /etc/workshop/pass
 Restart=on-failure
 User=platform-admin
 
@@ -172,7 +171,7 @@ Basic auth required for this variant — `service install` refuses a non-loopbac
 |---|---|
 | [Backend Service](./backend-service.md) | Same binary; `WORKSHOP_MODE=standalone` selects in-place transitions + auth/listen flags |
 | [DevContainer Feature](./devcontainer-feature.md) | Shares the in-place transition model, `setup.json`, compile-to-directory, and release assets |
-| [Compilation](../artifact/compilation.md) | `compile-workshop --output-dir` logic embedded in `--serve`; no OCI images involved |
+| [Compilation](../artifact/compilation.md) | `workshop compile --output-dir` logic embedded in `workshop serve`; no OCI images involved |
 | [Instrumentation](./instrumentation.md) | Same bashrc, scoped to workshop terminal sessions only; honors `WORKSHOP_ROOT` |
 | [Base Images](./base-images.md) | Not used — binaries installed directly on the host |
 | [CLI](./cli.md) | Not used — no container lifecycle to manage |

@@ -25,9 +25,7 @@ The `install.sh` script downloads everything from a single GitHub release (one v
 
 | Binary | Source | Purpose |
 |--------|--------|---------|
-| `workshop-backend` | Built from this repo, embedded frontend | Serves UI, API, proxies terminal |
-| `compile-workshop` | Built from this repo | Compiles workshop.yaml → flat files |
-| `workshop-setup` | Built from this repo | Applies step setup (shared logic with backend) |
+| `workshop` | Built from this repo, embedded frontend | Single binary; `serve` (UI, API, proxies terminal), `compile` (workshop.yaml → flat files), `setup` (applies step setup, shared logic with backend) |
 | `ttyd` | Vendored from upstream in our release | Terminal-over-HTTP |
 | `goss` | Vendored from upstream in our release | Step validation |
 
@@ -61,10 +59,10 @@ Plus:
 
 1. Workshop author writes `workshop.yaml` + steps in their repo
 2. They add the feature to `.devcontainer/devcontainer.json`
-3. On container build, `install.sh` installs platform tools (backend, ttyd, goss, compile-workshop)
-4. `postCreateCommand` runs `compile-workshop --output-dir /workshop` → generates the full `/workshop/` directory with ALL steps' content, plus a `setup.json` per step (file mappings + commands)
+3. On container build, `install.sh` installs platform tools (the `workshop` binary, ttyd, goss)
+4. `postCreateCommand` runs `workshop compile --output-dir /workshop` → generates the full `/workshop/` directory with ALL steps' content, plus a `setup.json` per step (file mappings + commands)
 5. If `step` option is set, applies setup for all steps up to and including that step (copies files, runs commands in order)
-6. `postStartCommand` launches `workshop-backend` in the background
+6. `postStartCommand` launches `workshop` (backend mode) in the background
 7. VS Code detects port 8080 and auto-opens the browser to the workshop UI
 
 ## Step Transitions: In-Place Linear Progression
@@ -91,14 +89,14 @@ The feature contributes lifecycle hooks via its metadata:
     "WORKSHOP_MODE": "devcontainer"
   },
   "postCreateCommand": "workshop-compile-and-setup",
-  "postStartCommand": "nohup workshop-backend >/tmp/workshop-backend.log 2>&1 &"
+  "postStartCommand": "nohup workshop >/tmp/workshop.log 2>&1 &"
 }
 ```
 
 | Hook | When | What |
 |------|------|------|
 | `postCreateCommand` | Once, on container creation | Compiles workshop content, applies setup up to the configured step |
-| `postStartCommand` | Every container start (including reopens) | Launches backend in background (log at `/tmp/workshop-backend.log`) |
+| `postStartCommand` | Every container start (including reopens) | Launches `workshop` (backend mode) in background (log at `/tmp/workshop.log`) |
 
 Feature options (`workshopPath`, `step`) are only available as env vars while `install.sh` runs at build time, so the installer bakes them into the generated `workshop-compile-and-setup` helper rather than reading them at runtime.
 
@@ -210,8 +208,8 @@ For skip-ahead scenarios:
 
 - **Base Images** — not used in devcontainer mode. The feature installs the same binaries but into whatever container the author specifies. The bashrc file is shared — `backend/instrumentation/workshop-platform.bashrc` is the single source of truth, included in GitHub releases for both the base image pipeline and the feature's `install.sh`.
 - **CLI** — not needed. The devcontainer lifecycle hooks handle startup. No step-transition container swaps.
-- **Backend** — same binary, different mode. `WORKSHOP_MODE=devcontainer` enables in-place transitions instead of requesting external swap. The step-application logic (`backend/setup/apply.go`) is shared between the backend's activate handler and the standalone `workshop-setup` CLI.
-- **Compile-Workshop** — enhanced with `--output-dir` to write the full `/workshop/` directory structure including `setup.json` and `stage/` per step.
+- **Backend** — same binary, different mode. `WORKSHOP_MODE=devcontainer` enables in-place transitions instead of requesting external swap. The step-application logic (`backend/setup/apply.go`) is shared between the backend's activate handler and the `workshop setup` subcommand.
+- **`workshop compile`** — enhanced with `--output-dir` to write the full `/workshop/` directory structure including `setup.json` and `stage/` per step.
 - **Dagger Pipeline** — Dagger is the primary build tool. All Go binary builds share a `buildGoBinary()` helper. Tool versions (ttyd, goss) are pinned in Dagger's download functions — one place. `BuildRelease` produces all release assets (both arches, vendored tools, bashrc). CI workflows are thin callers that invoke Dagger and upload results.
 
 ## Shared Code & Single Sources of Truth
@@ -221,7 +219,7 @@ To avoid duplication between the devcontainer feature and the existing base imag
 | Asset | Single Source | Used By |
 |-------|-------------|---------|
 | Bashrc instrumentation | `backend/instrumentation/workshop-platform.bashrc` | Base image Dagger build, `BuildRelease` → `install.sh` |
-| Step application logic | `backend/setup/apply.go` | Backend activate handler, `cmd/workshop-setup` CLI |
-| Go cross-compile | `dagger/main.go` → `buildGoBinary()` | All four binary build functions |
+| Step application logic | `backend/setup/apply.go` | Backend activate handler, `workshop setup` subcommand (`cmd/workshop`) |
+| Go cross-compile | `dagger/main.go` → `buildGoBinary()` | The unified `workshop` binary build function |
 | Tool versions (ttyd, goss) | `dagger/main.go` → `downloadTtydArch()` / `downloadGossArch()` | Base image build, `BuildRelease` |
 | All release assets | `dagger/main.go` → `BuildRelease()` | `make build-release`, CI release workflow |

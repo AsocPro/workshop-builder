@@ -6,7 +6,7 @@ The student-facing web application. A thin layer that displays tutorial content,
 
 ## Delivery
 
-The frontend is served as static assets (HTML, JS, CSS) embedded in the [workshop-backend binary](../platform/backend-service.md). Students access it by navigating to the workspace URL in a browser — there is no separate frontend server and no installation step for students.
+The frontend is served as static assets (HTML, JS, CSS) embedded in the [workshop binary](../platform/backend-service.md). Students access it by navigating to the workspace URL in a browser — there is no separate frontend server and no installation step for students.
 
 This applies in both local mode (browser connects to the backend running inside the Docker container) and cluster mode (browser connects to the backend in the workspace pod, via whatever ingress or port-forward is configured).
 

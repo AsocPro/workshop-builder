@@ -55,7 +55,7 @@ The pipeline builds on top of [platform base images](../platform/base-images.md)
 | `workshop-base:ubuntu` | General Linux workshops |
 | `workshop-base:centos` | RHEL-ecosystem workshops |
 
-Base images include: tini, workshop-backend binary (with embedded web UI), goss, asciinema, and shell instrumentation (`/etc/workshop-platform.bashrc`). Authors `FROM workshop-base:<distro>` and layer on their content.
+Base images include: tini, workshop binary (with embedded web UI), goss, asciinema, and shell instrumentation (`/etc/workshop-platform.bashrc`). Authors `FROM workshop-base:<distro>` and layer on their content.
 
 When the author specifies a custom `base.image` or `base.containerFile` (not a `workshop-base:*` image), the author must install the required platform components themselves. The pipeline validates their presence before building. See [Base Images — Custom Base Image Requirements](../platform/base-images.md#custom-base-image-requirements).
 

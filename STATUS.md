@@ -26,7 +26,7 @@ detail lives in the `plans/mNN` file, this table just rolls up.
 | Dagger per-step OCI image build | [compilation](docs/artifact/compilation.md) | ✅ | [m4](plans/m4-dagger-pipeline.md) | One tagged image per step, `FROM` base |
 | Base images (`ubuntu`/`rocky`/`debian`) | [base-images](docs/platform/base-images.md) | ✅ | [m12](plans/m12-base-images.md) | `build-base-images` + `publish-base-images` |
 | Release binary pipeline | — | ✅ | [m13](plans/m13-devcontainer-feature.md) | `build-release`: binaries + vendored ttyd/goss + bashrc + installer |
-| `compile-workshop` / `workshop-setup` helpers | [devcontainer](docs/platform/devcontainer-feature.md) | ✅ | [m13](plans/m13-devcontainer-feature.md) | Thin wrappers over `pkg/workshop` for build-from-source modes |
+| `workshop compile` / `workshop setup` subcommands | [devcontainer](docs/platform/devcontainer-feature.md) | ✅ | [m13](plans/m13-devcontainer-feature.md)/[m15](plans/m15-cli-unification.md) | Subcommands of the unified `workshop` binary, over `pkg/workshop`, for build-from-source modes |
 
 ## Runtime (backend — one binary, embedded UI)
 
@@ -48,7 +48,7 @@ detail lives in the `plans/mNN` file, this table just rolls up.
 | Capability | Designed | Built | Milestone | Notes |
 |---|---|---|---|---|
 | Docker/podman + CLI (`workshop run`) | [cli](docs/platform/cli.md) | ✅ | [m9](plans/m9-cli.md) | Host management panel + **image-swap** step transitions |
-| Standalone (`--serve` + systemd) | [standalone](docs/platform/standalone-mode.md) | ✅ | [m14](plans/m14-standalone-mode.md) | Compiles from source, runs on the real host |
+| Standalone (`workshop serve` + systemd) | [standalone](docs/platform/standalone-mode.md) | ✅ | [m14](plans/m14-standalone-mode.md) | Compiles from source, runs on the real host |
 | DevContainer feature | [devcontainer](docs/platform/devcontainer-feature.md) | ✅ | [m13](plans/m13-devcontainer-feature.md) | Feature downloads release binaries, compiles from source |
 | Cluster / multi-tenant (operator) | [operator](docs/platform/operator.md) | ⬜ | — | Designed only |
 | CRDs (WorkspaceTemplate / WorkspaceInstance) | [crds](docs/platform/crds.md) | ⬜ | — | Designed only |
@@ -68,7 +68,7 @@ detail lives in the `plans/mNN` file, this table just rolls up.
 |---|---|---|---|---|
 | Live LLM help (streaming API, context assembly) | [llm-help](docs/platform/llm-help.md) | ⬜ | — | Static-file version is the 🟡 "Help panel" row above |
 | Builder GUI (Wails desktop app) | [gui](docs/presentation/gui.md) | ⬜ | — | Authoring is CLI + edit-YAML today |
-| Unify tools into one `workshop` command | — | ⬜ | [m15](plans/m15-cli-unification.md) | Planned; backend already partially unified |
+| Unify tools into one `workshop` command | — | ✅ | [m15](plans/m15-cli-unification.md) | Single `workshop` binary; subcommands `serve`/`run`/`compile`/`setup`/`service` dispatch to the existing packages |
 
 ---
 

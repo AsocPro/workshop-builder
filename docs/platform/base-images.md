@@ -19,7 +19,7 @@ Every base image contains:
 | Component | Path | Purpose |
 |---|---|---|
 | tini | `/sbin/tini` | PID 1 init — zombie reaping, signal forwarding |
-| workshop-backend | `/usr/local/bin/workshop-backend` | Runtime engine — web UI, API, terminal proxy, recording |
+| workshop | `/usr/local/bin/workshop` | Runtime engine — web UI, API, terminal proxy, recording |
 | goss | `/usr/local/bin/goss` | Step validation — tests student's container state |
 | asciinema | `/usr/bin/asciinema` | Terminal recording — full session capture with replay |
 | workshop-platform.bashrc | `/etc/workshop-platform.bashrc` | Shell instrumentation — PROMPT_COMMAND for command logging |
@@ -28,7 +28,7 @@ Every base image contains:
 The entrypoint is pre-configured:
 
 ```
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop"]
 ```
 
 ## Shell Instrumentation
@@ -44,7 +44,7 @@ workshop-base:ubuntu
   ├── Ubuntu LTS base layers
   ├── Platform tooling layer:
   │   ├── tini
-  │   ├── workshop-backend (with embedded web UI assets)
+  │   ├── workshop (with embedded web UI assets)
   │   ├── goss
   │   ├── asciinema
   │   └── /etc/workshop-platform.bashrc
@@ -121,7 +121,7 @@ The following components must be present in the custom base image for the worksh
 | Component | Required Path | Purpose | Notes |
 |---|---|---|---|
 | tini | `/sbin/tini` | PID 1 init — zombie reaping, signal forwarding | Static binary; download from [tini releases](https://github.com/krallin/tini/releases) |
-| workshop-backend | `/usr/local/bin/workshop-backend` | Runtime engine — web UI, API, terminal proxy | Static Go binary with embedded assets; provided by platform releases |
+| workshop | `/usr/local/bin/workshop` | Runtime engine — web UI, API, terminal proxy | Static Go binary with embedded assets; provided by platform releases |
 | goss | `/usr/local/bin/goss` | Step validation | Static binary; download from [goss releases](https://github.com/goss-org/goss/releases). Only required if any step has a `goss.yaml` file. |
 | asciinema | `/usr/bin/asciinema` | Terminal session recording | Python package or static build. Only required if session recording is enabled. |
 | workshop-platform.bashrc | `/etc/workshop-platform.bashrc` | Shell instrumentation for command logging | Plain shell script; provided by platform releases |
@@ -134,7 +134,7 @@ Additionally, the custom base image must:
    ```
 2. **Set the entrypoint**:
    ```dockerfile
-   ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+   ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop"]
    ```
 3. **Set the working directory**:
    ```dockerfile
@@ -159,7 +159,7 @@ Install shell prerequisites (bash, curl, ca-certificates)
       ▼
 Copy platform binaries from release artifacts:
   → tini            → /sbin/tini
-  → workshop-backend → /usr/local/bin/workshop-backend
+  → workshop          → /usr/local/bin/workshop
   → goss            → /usr/local/bin/goss
   → asciinema       → /usr/bin/asciinema
   → workshop-platform.bashrc → /etc/workshop-platform.bashrc
@@ -173,7 +173,7 @@ Append shell instrumentation source to /etc/bash.bashrc
       ▼
 mkdir -p /workshop/runtime
 WORKDIR /workspace
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop"]
       │
       ▼
 Push as workshop-base:{alpine,ubuntu,centos}

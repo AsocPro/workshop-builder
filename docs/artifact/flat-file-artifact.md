@@ -58,7 +58,7 @@ The author writes YAML (`workshop.yaml`, per-step `step.yaml`). The build pipeli
   │   └── ...
 ```
 
-`setup.json` and `stage/` are written by `compile-workshop --output-dir` (equivalently `pkg/workshop.CompileToDir()`) and consumed by **in-place modes** ([devcontainer](../platform/devcontainer-feature.md), [standalone](../platform/standalone-mode.md)), where step transitions apply setup inside the running environment instead of swapping containers. In container mode the same information is applied at image build time by the Dagger pipeline, so these files are not baked into OCI images. `setup.json` is always written, even when empty, so runtime logic stays unconditional.
+`setup.json` and `stage/` are written by `workshop compile --output-dir` (equivalently `pkg/workshop.CompileToDir()`) and consumed by **in-place modes** ([devcontainer](../platform/devcontainer-feature.md), [standalone](../platform/standalone-mode.md)), where step transitions apply setup inside the running environment instead of swapping containers. In container mode the same information is applied at image build time by the Dagger pipeline, so these files are not baked into OCI images. `setup.json` is always written, even when empty, so runtime logic stays unconditional.
 
 In standalone mode the root is not `/workshop` but `WORKSHOP_ROOT` (default `~/.workshop/<name>/`), and the root additionally contains a generated `workshop-rcfile` for scoped terminal instrumentation. Recompiling on restart replaces `workshop.json` and `steps/` but never touches `runtime/`.
 
@@ -224,7 +224,7 @@ In-place step setup at `/workshop/steps/<id>/setup.json` — present only in com
 | `commands` | array | Shell commands run via `sh -c`, in order, after files are copied |
 | `env` | object | Environment variables appended to the command environment |
 
-All three fields are always present (empty arrays/object when unused). Compiled from the step's `step.yaml` `files:`/`commands:`/`env:` blocks — the same blocks the Dagger pipeline applies at image build time in container mode. Applied by `backend/setup.Apply()`, shared between the backend's activate handler and the `workshop-setup` CLI.
+All three fields are always present (empty arrays/object when unused). Compiled from the step's `step.yaml` `files:`/`commands:`/`env:` blocks — the same blocks the Dagger pipeline applies at image build time in container mode. Applied by `backend/setup.Apply()`, shared between the backend's activate handler and the `workshop setup` subcommand.
 
 ## Schema: llm.json
 

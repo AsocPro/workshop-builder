@@ -143,11 +143,11 @@ Author creates:
 ```
 workshop-base:ubuntu (maintained by platform team)
   ├── tini
-  ├── workshop-backend binary (embedded web UI assets)
+  ├── workshop binary (embedded web UI assets)
   ├── asciinema
   ├── goss
   ├── /etc/workshop-platform.bashrc (PROMPT_COMMAND instrumentation)
-  └── ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+  └── ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop"]
          │
          ▼ author layers (via workshop.yaml build)
 myorg/kubernetes-101:step-1-intro

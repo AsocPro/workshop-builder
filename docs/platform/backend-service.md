@@ -11,7 +11,7 @@ The backend binary is pre-installed in [base images](./base-images.md). When usi
 The backend is PID 2 in the workspace container, launched by tini:
 
 ```
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop"]
 ```
 
 tini (as PID 1) handles zombie process reaping and clean signal forwarding. The backend owns its child processes (ttyd wrapped in asciinema).
@@ -20,7 +20,7 @@ tini (as PID 1) handles zombie process reaping and clean signal forwarding. The 
 
 ```
 tini (PID 1)
-  └── workshop-backend (PID 2)
+  └── workshop (PID 2)
         ├── Read /workshop/workshop.json + /workshop/steps/*  (flat file metadata)
         ├── Read WORKSHOP_MANAGEMENT_URL env var (always set in local mode; may be set in cluster mode)
         ├── Create /workshop/runtime/ directory
@@ -39,11 +39,11 @@ The backend runs in one of three modes, selected by `WORKSHOP_MODE` (default `co
 |---|---|---|
 | `container` | default | External swap — [CLI](./cli.md) (local) or [Operator](./operator.md) (cluster); backend has no transition API |
 | `devcontainer` | devcontainer feature `containerEnv` | In-place — `POST /api/steps/:id/activate` applies `setup.json` |
-| `standalone` | `--serve` flag | In-place — same activate path; see [Standalone Mode](./standalone-mode.md) |
+| `standalone` | `workshop serve` subcommand | In-place — same activate path; see [Standalone Mode](./standalone-mode.md) |
 
 Handlers branch on the **in-place capability** (`setup.InPlaceMode()`), never on raw mode strings. In in-place modes the activate route is registered and applies the step's `setup.json` (staged file copies + commands) on first visit, tracked by a per-step applied flag. `GET /api/state` reports `mode` and `inPlace` so the frontend can choose between navigate (view-only) and activate.
 
-Standalone mode additionally accepts `--listen`, `--auth-user`, and `--auth-password-file` flags (basic auth wrapping every route including the terminal WebSocket), and `workshop-backend service install` generates a systemd unit for persistent deployment.
+Standalone mode additionally accepts `--listen`, `--auth-user`, and `--auth-password-file` flags (basic auth wrapping every route including the terminal WebSocket), and `workshop service install` generates a systemd unit for persistent deployment.
 
 ## Responsibilities
 
@@ -180,11 +180,11 @@ The backend instruments the WebSocket proxy for terminal connections:
 ```
 workshop-base:ubuntu
   ├── /sbin/tini
-  ├── /usr/local/bin/workshop-backend  (embedded web UI assets)
+  ├── /usr/local/bin/workshop  (embedded web UI assets)
   ├── /usr/local/bin/goss
   ├── /usr/bin/asciinema
   ├── /etc/workshop-platform.bashrc
-  └── ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop-backend"]
+  └── ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/workshop"]
 ```
 
 Authors `FROM workshop-base:ubuntu` and everything is ready.

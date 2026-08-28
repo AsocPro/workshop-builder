@@ -54,22 +54,26 @@ binary at build time (source has only a `.gitkeep` placeholder).
 
 ## Architecture (the built reality)
 
-Three binaries, one shared compiler:
+One binary, one shared compiler, subcommands dispatch to existing packages:
 
-- **`workshop-backend`** (`backend/`) — serves the student UI (embedded Svelte via
-  `go:embed`) + terminal (ttyd) + goss validation. Multi-mode via flags: default
-  container entrypoint, `--serve <dir>` (standalone), `service install|uninstall`
-  (systemd). This is the always-present core.
-- **`workshop`** (`cli/`) — host-side **podman** orchestrator (not the Docker daemon):
-  starts the container, runs a separate management panel, does **image-swap** step
-  transitions. Docker/podman delivery mode only.
-- **`compile-workshop` / `workshop-setup`** (`cmd/`) — thin build-from-source wrappers
-  used by standalone and devcontainer modes.
+- **`workshop`** (`cmd/workshop` dispatcher) — single binary with subcommands:
+  - `workshop serve <dir>` — runs the backend against a compiled/compiling workshop dir
+    (standalone mode); bare `workshop` with no subcommand (or run as container PID 2) is
+    the default container entrypoint. Backend logic lives in `backend/`: student UI
+    (embedded Svelte via `go:embed`) + terminal (ttyd) + goss validation.
+  - `workshop run <image>` — host-side **podman** orchestrator (not the Docker daemon):
+    starts the container, runs a separate management panel, does **image-swap** step
+    transitions. Docker/podman delivery mode only. Logic in `cli/`.
+  - `workshop compile <dir>` / `workshop setup` — build-from-source subcommands used by
+    standalone and devcontainer modes, backed by `pkg/workshop/compilecli` and
+    `backend/setup`.
+  - `workshop service install --serve <dir>|uninstall` — generates/removes the systemd
+    unit (the generated `ExecStart` now invokes `workshop serve ...`).
 - **`pkg/workshop`** — the ONE compiler (`Compile`, `CompileToDir`). Dagger,
-  `compile-workshop`, and standalone all call it. No compile logic lives anywhere else.
+  `workshop compile`, and standalone all call it. No compile logic lives anywhere else.
 
 Delivery modes (all built): Docker/podman CLI (image-swap transitions) · standalone
-(`--serve`, in-place transitions) · DevContainer feature.
+(`workshop serve`, in-place transitions) · DevContainer feature.
 
 Key design facts:
 - Each workshop **step is a separate tagged OCI image** (`<image>:<step-id>`), built
@@ -84,7 +88,8 @@ Key design facts:
 - `pkg/workshop/` — parse / validate / compile (the single compiler)
 - `backend/` — runtime server: handlers, store, process (ttyd), setup, servecmd (systemd), standalone
 - `cli/` — podman orchestration + management panel + image-swap
-- `cmd/` — `compile-workshop`, `workshop-setup` wrappers
+- `cmd/workshop/` — the unified `workshop` binary's dispatcher (subcommands: `serve`,
+  `run`, `compile`, `setup`, `service`)
 - `dagger/` — build pipeline (its own Go module)
 - `frontend/` — Svelte 5 + Vite (built into the backend binary)
 - `devcontainer-feature/` — DevContainer Feature (install.sh + metadata)
