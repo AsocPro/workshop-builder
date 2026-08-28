@@ -1,7 +1,7 @@
 // Package setup applies per-step setup specs (setup.json) — staged file
 // copies and shell commands. It is the single implementation behind both the
-// backend's activate handler (devcontainer/standalone modes) and the
-// cmd/workshop-setup CLI (devcontainer postCreateCommand skip-ahead).
+// backend's activate handler (devcontainer/standalone modes) and RunThrough,
+// used by the devcontainer postCreateCommand skip-ahead helper.
 package setup
 
 import (
@@ -85,6 +85,60 @@ func Apply(workshopRoot, stepID string, s *StepSetup) error {
 		}
 	}
 	return nil
+}
+
+// RunThrough applies each step's setup, in workshop order, up to and including
+// throughStep. Empty throughStep is a no-op (start at step 1). It backs the
+// devcontainer skip-ahead helper. Errors are returned, not fatal.
+func RunThrough(workshopDir, throughStep string) error {
+	if throughStep == "" {
+		fmt.Println("No step specified — starting at step 1, no setup applied.")
+		return nil
+	}
+	stepIDs, err := readStepOrder(workshopDir)
+	if err != nil {
+		return fmt.Errorf("reading workshop.json: %w", err)
+	}
+	found := false
+	for _, id := range stepIDs {
+		s, err := Load(workshopDir, id)
+		if err != nil {
+			return fmt.Errorf("loading setup for %s: %w", id, err)
+		}
+		fmt.Printf("Applying setup for %s...\n", id)
+		if err := Apply(workshopDir, id, s); err != nil {
+			return fmt.Errorf("applying setup for %s: %w", id, err)
+		}
+		if id == throughStep {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("step %q not found in workshop", throughStep)
+	}
+	fmt.Printf("Setup applied through %s.\n", throughStep)
+	return nil
+}
+
+func readStepOrder(workshopDir string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(workshopDir, "workshop.json"))
+	if err != nil {
+		return nil, err
+	}
+	var wj struct {
+		Steps []struct {
+			ID string `json:"id"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(data, &wj); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(wj.Steps))
+	for _, s := range wj.Steps {
+		ids = append(ids, s.ID)
+	}
+	return ids, nil
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
