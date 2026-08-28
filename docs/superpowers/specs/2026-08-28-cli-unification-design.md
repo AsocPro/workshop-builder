@@ -84,7 +84,28 @@ unused code just adds size. This matches the plan's "one binary" goal.
 - `devcontainer-feature/src/workshop/devcontainer-feature.json`: postStart → `workshop`.
 - `scripts/install-standalone.sh`, `scripts/smoke-test.sh`, `Makefile` → new
   names/subcommands.
-- Docs: `STATUS.md` m15 row → ✅; `CLAUDE.md` architecture section; relevant `docs/`.
+- Docs — `STATUS.md` m15 row → ✅; `CLAUDE.md` architecture section; and the `docs/`
+  design-of-record files below. **Note two non-mechanical rewrites:**
+  `workshop-backend --serve <dir>` → `workshop serve <dir>` (a *flag becomes a
+  subcommand*), and `compile-workshop`/`workshop-setup` → `workshop compile`/`workshop
+  setup`. **Do not touch `workshop run`** — the CLI binary is already `workshop`, so that
+  syntax is already the target.
+
+  Built-reality docs that describe commands this change alters (substantive edits):
+  - `docs/platform/backend-service.md` — ENTRYPOINT, process-tree names, `service
+    install`, `--serve` → `serve`.
+  - `docs/platform/standalone-mode.md` — `workshop-backend --serve`, `workshop-setup`,
+    `compile-workshop`, tool table, systemd `ExecStart` line.
+  - `docs/platform/devcontainer-feature.md` — tool table, install.sh flow,
+    `postStartCommand`, `cmd/workshop-setup` reference.
+  - `docs/platform/base-images.md` — ENTRYPOINT + tool-table paths → `/usr/local/bin/workshop`.
+
+  Trivial component renames (single mention each):
+  - `docs/artifact/compilation.md`, `docs/artifact/flat-file-artifact.md`,
+    `docs/overview.md` (its `workshop run` stays), `docs/presentation/frontend.md`.
+
+  Left unchanged: `docs/platform/cli.md`, `docs/plan.md`, `docs/platform/crds.md` — their
+  references are all `workshop run` (already correct) or designed-only cluster context.
 
 ### 5. Testing
 
