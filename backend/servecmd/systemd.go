@@ -1,4 +1,4 @@
-// Package servecmd implements the `workshop-backend service` subcommand —
+// Package servecmd implements the `workshop service` subcommand —
 // generating and installing a systemd unit that freezes a standalone-mode
 // invocation — plus small helpers shared with the standalone serve path.
 package servecmd
@@ -26,7 +26,7 @@ const systemUnitPath = "/etc/systemd/system/workshop.service"
 // RunService dispatches `service install [flags]` and `service uninstall`.
 func RunService(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: workshop-backend service install|uninstall [flags]")
+		return fmt.Errorf("usage: workshop service install|uninstall [flags]")
 	}
 	switch args[0] {
 	case "install":
@@ -142,7 +142,7 @@ func runUninstall(args []string) error {
 func GenerateUnit(exePath string, cfg ServeConfig, unitUser string) string {
 	exec := []string{
 		unitQuote(exePath),
-		"--serve", unitQuote(cfg.ServeDir),
+		"serve", unitQuote(cfg.ServeDir),
 		"--listen", unitQuote(cfg.Listen),
 	}
 	if cfg.AuthUser != "" {

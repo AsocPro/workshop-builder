@@ -14,11 +14,11 @@ func TestGenerateUnit(t *testing.T) {
 		AuthUser:         "admin",
 		AuthPasswordFile: "/etc/workshop/pass",
 	}
-	unit := GenerateUnit("/usr/local/bin/workshop-backend", cfg, "platform-admin")
+	unit := GenerateUnit("/usr/local/bin/workshop", cfg, "platform-admin")
 
 	for _, want := range []string{
 		"Description=Workshop runbook (onboarding-workshop)",
-		"ExecStart=/usr/local/bin/workshop-backend --serve /opt/onboarding-workshop --listen 0.0.0.0:8080 --auth-user admin --auth-password-file /etc/workshop/pass",
+		"ExecStart=/usr/local/bin/workshop serve /opt/onboarding-workshop --listen 0.0.0.0:8080 --auth-user admin --auth-password-file /etc/workshop/pass",
 		"Restart=on-failure",
 		"User=platform-admin",
 		"WantedBy=multi-user.target",
@@ -31,7 +31,7 @@ func TestGenerateUnit(t *testing.T) {
 
 func TestGenerateUnit_UserUnit(t *testing.T) {
 	cfg := ServeConfig{ServeDir: "/opt/w", Listen: "127.0.0.1:8080"}
-	unit := GenerateUnit("/usr/local/bin/workshop-backend", cfg, "")
+	unit := GenerateUnit("/usr/local/bin/workshop", cfg, "")
 
 	if strings.Contains(unit, "User=") {
 		t.Errorf("user unit must not contain User=:\n%s", unit)
@@ -46,8 +46,8 @@ func TestGenerateUnit_UserUnit(t *testing.T) {
 
 func TestGenerateUnit_QuotesPaths(t *testing.T) {
 	cfg := ServeConfig{ServeDir: "/opt/my workshop", Listen: "127.0.0.1:8080"}
-	unit := GenerateUnit("/usr/local/bin/workshop-backend", cfg, "op")
-	if !strings.Contains(unit, `--serve "/opt/my workshop"`) {
+	unit := GenerateUnit("/usr/local/bin/workshop", cfg, "op")
+	if !strings.Contains(unit, `serve "/opt/my workshop"`) {
 		t.Errorf("path with spaces should be quoted:\n%s", unit)
 	}
 }
