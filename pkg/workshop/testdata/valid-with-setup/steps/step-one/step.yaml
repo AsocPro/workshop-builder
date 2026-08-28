@@ -1,0 +1,8 @@
+title: "Step One"
+files:
+  - source: hello.txt
+    target: /workspace/hello.txt
+commands:
+  - echo one >> /tmp/setup-log
+env:
+  STEP_ONE: "yes"

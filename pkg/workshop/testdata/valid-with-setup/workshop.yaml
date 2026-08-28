@@ -1,0 +1,10 @@
+version: v1
+workshop:
+  name: test-with-setup
+  image: localhost/test-with-setup
+  navigation: linear
+base:
+  image: workshop-base:ubuntu
+steps:
+  - step-one
+  - step-two
