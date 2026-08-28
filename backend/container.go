@@ -1,7 +1,6 @@
-package main
+package backend
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,41 +8,12 @@ import (
 	"path/filepath"
 
 	"github.com/asocpro/workshop-builder/backend/process"
-	"github.com/asocpro/workshop-builder/backend/servecmd"
 	"github.com/asocpro/workshop-builder/backend/store"
 )
 
-func main() {
-	// `workshop-backend service install|uninstall` — systemd self-install.
-	if len(os.Args) > 1 && os.Args[1] == "service" {
-		if err := servecmd.RunService(os.Args[2:]); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
-
-	var opts standaloneOptions
-	flag.StringVar(&opts.ServeDir, "serve", "", "compile and serve a workshop source directory (standalone mode)")
-	flag.StringVar(&opts.Listen, "listen", "127.0.0.1:8080", "listen address (standalone mode)")
-	flag.StringVar(&opts.AuthUser, "auth-user", "", "basic auth username (standalone mode)")
-	flag.StringVar(&opts.AuthPasswordFile, "auth-password-file", "", "file containing the basic auth password (standalone mode; alternative: WORKSHOP_AUTH_PASSWORD env)")
-	flag.Parse()
-
-	if opts.ServeDir != "" {
-		if err := runStandalone(opts); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
-	if opts.AuthUser != "" || opts.AuthPasswordFile != "" {
-		log.Fatal("--auth-user/--auth-password-file require --serve (standalone mode)")
-	}
-	runContainer()
-}
-
-// runContainer is the container-mode entrypoint (Docker local mode, cluster
+// RunContainer is the container-mode entrypoint (Docker local mode, cluster
 // mode, devcontainer mode) — configured entirely by environment variables.
-func runContainer() {
+func RunContainer() {
 	workshopRoot := os.Getenv("WORKSHOP_ROOT")
 	if workshopRoot == "" {
 		workshopRoot = "/workshop"

@@ -1,4 +1,4 @@
-package main
+package backend
 
 import (
 	"fmt"
@@ -14,18 +14,18 @@ import (
 	"github.com/asocpro/workshop-builder/pkg/workshop"
 )
 
-type standaloneOptions struct {
+type StandaloneOptions struct {
 	ServeDir         string
 	Listen           string
 	AuthUser         string
 	AuthPasswordFile string
 }
 
-// runStandalone serves a workshop straight from a source checkout: compile to
+// RunStandalone serves a workshop straight from a source checkout: compile to
 // WORKSHOP_ROOT, scope shell instrumentation to workshop terminal sessions,
 // and serve with optional basic auth. Single user per server; the server's
 // state is the workshop's state.
-func runStandalone(opts standaloneOptions) error {
+func RunStandalone(opts StandaloneOptions) error {
 	srcDir, err := filepath.Abs(opts.ServeDir)
 	if err != nil {
 		return fmt.Errorf("resolving workshop path: %w", err)
@@ -124,7 +124,7 @@ func guardInfrastructure(loaded *workshop.LoadedWorkshop) error {
 // resolveAuthPassword loads the basic auth password from the password file or
 // WORKSHOP_AUTH_PASSWORD. Passwords never come from argv — `ps` and shell
 // history are shared surfaces on exactly the kind of server this runs on.
-func resolveAuthPassword(opts standaloneOptions) (string, error) {
+func resolveAuthPassword(opts StandaloneOptions) (string, error) {
 	if opts.AuthUser == "" && opts.AuthPasswordFile == "" {
 		return "", nil
 	}
