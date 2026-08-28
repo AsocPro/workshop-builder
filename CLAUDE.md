@@ -19,6 +19,10 @@ capability exists because a doc describes it.
 
 - **[STATUS.md](STATUS.md) is the source of truth for what actually runs** (✅ built /
   🟡 partial / ⬜ designed-only). Check it before claiming, using, or modifying a feature.
+- **[DECISIONS.md](DECISIONS.md) is why things are the way they are** — decisions +
+  reasoning + what would make us revisit. Read it before questioning a design choice or
+  re-proposing something (e.g. it records that the full multi-tenant scope is kept on
+  purpose, and the single-user prune was considered and deferred — don't re-open unprompted).
 - `docs/` = design of record. `plans/mNN-*.md` = implementation milestones (what got
   built, in order). `docs/plan.md` tracks *doc* completeness, not build state.
 - When code and spec diverge, that's a signal to reconcile — surface it, don't silently
@@ -85,7 +89,7 @@ Key design facts:
 - `frontend/` — Svelte 5 + Vite (built into the backend binary)
 - `devcontainer-feature/` — DevContainer Feature (install.sh + metadata)
 - `examples/hello-linux/` — the reference workshop, used as the test fixture
-- `docs/` — spec · `plans/` — implementation milestones · `STATUS.md` — build tracker
+- `docs/` — spec · `plans/` — implementation milestones · `STATUS.md` — build tracker · `DECISIONS.md` — decisions + rationale
 
 ## Conventions & gotchas
 
