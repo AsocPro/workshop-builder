@@ -2,6 +2,10 @@
 
 Work through this list top to bottom. Each item is ordered by dependency — earlier docs inform later ones. Check off items as you complete them.
 
+> **Note:** "Complete" / checked items here mean the **doc is written**, not that the
+> feature is built. For build state (✅ built / 🟡 partial / ⬜ designed-only) see
+> [STATUS.md](../STATUS.md). This file tracks the spec; STATUS.md tracks reality.
+
 The plan is organized around a **single-user local mode milestone first**. Cluster mode (CRDs, operator, provisioners) is deferred until local mode is fully documented and implemented.
 
 ---
