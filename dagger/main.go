@@ -36,7 +36,7 @@ func (m *WorkshopBuilder) Test(
 // volumes, and ldflags change in one place.
 func (m *WorkshopBuilder) buildGoBinary(
 	src *dagger.Directory,
-	pkg string, // e.g. "./cli/", "./cmd/compile-workshop/"
+	pkg string, // e.g. "./cmd/workshop/"
 	outputName string,
 	targetOS string,
 	targetArch string,
@@ -78,58 +78,21 @@ func (m *WorkshopBuilder) buildFrontendDist(src *dagger.Directory) *dagger.Direc
 		Directory("/app/dist")
 }
 
-// BuildBackend builds the frontend then cross-compiles the backend binary
-// (no CGO) with frontend assets embedded.
-func (m *WorkshopBuilder) BuildBackend(
+// BuildWorkshopBinary builds the frontend then cross-compiles the single
+// unified `workshop` binary (frontend embedded, no CGO).
+func (m *WorkshopBuilder) BuildWorkshopBinary(
 	ctx context.Context,
 	// +defaultPath="/"
 	src *dagger.Directory,
-	// Target OS (default: linux)
 	// +optional
 	// +default="linux"
 	targetOS string,
-	// Target arch (default: amd64)
 	// +optional
 	// +default="amd64"
 	targetArch string,
 ) *dagger.File {
 	srcWithDist := src.WithDirectory("backend/frontend/dist", m.buildFrontendDist(src))
-	return m.buildGoBinary(srcWithDist, "./backend/", "workshop-backend", targetOS, targetArch)
-}
-
-// BuildCompileWorkshop cross-compiles the compile-workshop binary.
-func (m *WorkshopBuilder) BuildCompileWorkshop(
-	ctx context.Context,
-	// +defaultPath="/"
-	src *dagger.Directory,
-	// Target OS (default: linux)
-	// +optional
-	// +default="linux"
-	targetOS string,
-	// Target arch (default: amd64)
-	// +optional
-	// +default="amd64"
-	targetArch string,
-) *dagger.File {
-	return m.buildGoBinary(src, "./cmd/compile-workshop/", "compile-workshop", targetOS, targetArch)
-}
-
-// BuildSetup cross-compiles the workshop-setup binary (in-place step setup,
-// shared logic with the backend's activate handler).
-func (m *WorkshopBuilder) BuildSetup(
-	ctx context.Context,
-	// +defaultPath="/"
-	src *dagger.Directory,
-	// Target OS (default: linux)
-	// +optional
-	// +default="linux"
-	targetOS string,
-	// Target arch (default: amd64)
-	// +optional
-	// +default="amd64"
-	targetArch string,
-) *dagger.File {
-	return m.buildGoBinary(src, "./cmd/workshop-setup/", "workshop-setup", targetOS, targetArch)
+	return m.buildGoBinary(srcWithDist, "./cmd/workshop/", "workshop", targetOS, targetArch)
 }
 
 // ── BuildBaseImages ───────────────────────────────────────────────────────────
@@ -144,10 +107,10 @@ func (m *WorkshopBuilder) BuildBaseImages(
 	// +defaultPath="/"
 	src *dagger.Directory,
 ) (*dagger.Directory, error) {
-	backendBin := m.BuildBackend(ctx, src, "", "")
+	workshopBin := m.BuildWorkshopBinary(ctx, src, "", "")
 	out := dag.Directory()
 	for _, variant := range []string{"ubuntu", "rocky", "debian"} {
-		img, err := m.buildBaseImage(ctx, src, variant, backendBin)
+		img, err := m.buildBaseImage(ctx, src, variant, workshopBin)
 		if err != nil {
 			return nil, fmt.Errorf("building %s: %w", variant, err)
 		}
@@ -174,9 +137,9 @@ func (m *WorkshopBuilder) PublishBaseImages(
 	if repo == "" {
 		repo = "ghcr.io/asocpro/workshop-base"
 	}
-	backendBin := m.BuildBackend(ctx, src, "", "")
+	workshopBin := m.BuildWorkshopBinary(ctx, src, "", "")
 	for _, variant := range []string{"ubuntu", "rocky", "debian"} {
-		img, err := m.buildBaseImage(ctx, src, variant, backendBin)
+		img, err := m.buildBaseImage(ctx, src, variant, workshopBin)
 		if err != nil {
 			return fmt.Errorf("building %s: %w", variant, err)
 		}
@@ -194,7 +157,7 @@ func (m *WorkshopBuilder) buildBaseImage(
 	ctx context.Context,
 	src *dagger.Directory,
 	variant string,
-	backendBin *dagger.File,
+	workshopBin *dagger.File,
 ) (*dagger.Container, error) {
 	tini := m.downloadTini(ctx)
 	goss := m.downloadGoss(ctx)
@@ -203,11 +166,11 @@ func (m *WorkshopBuilder) buildBaseImage(
 
 	switch variant {
 	case "ubuntu":
-		return m.buildUbuntuBase(bashrc, backendBin, tini, goss, ttyd), nil
+		return m.buildUbuntuBase(bashrc, workshopBin, tini, goss, ttyd), nil
 	case "rocky":
-		return m.buildRockyBase(bashrc, backendBin, tini, goss, ttyd), nil
+		return m.buildRockyBase(bashrc, workshopBin, tini, goss, ttyd), nil
 	case "debian":
-		return m.buildDebianBase(bashrc, backendBin, tini, goss, ttyd), nil
+		return m.buildDebianBase(bashrc, workshopBin, tini, goss, ttyd), nil
 	default:
 		return nil, fmt.Errorf("unknown base image variant: %s", variant)
 	}
@@ -215,7 +178,7 @@ func (m *WorkshopBuilder) buildBaseImage(
 
 func (m *WorkshopBuilder) buildUbuntuBase(
 	bashrc *dagger.File,
-	backendBin, tini, goss, ttyd *dagger.File,
+	workshopBin, tini, goss, ttyd *dagger.File,
 ) *dagger.Container {
 	return dag.Container().
 		From("ubuntu:24.04").
@@ -227,17 +190,17 @@ func (m *WorkshopBuilder) buildUbuntuBase(
 		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
-		WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/workshop", workshopBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/etc/workshop-platform.bashrc", bashrc).
 		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
 		WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
 		WithEntrypoint([]string{"/sbin/tini", "--"}).
-		WithDefaultArgs([]string{"/usr/local/bin/workshop-backend"})
+		WithDefaultArgs([]string{"/usr/local/bin/workshop"})
 }
 
 func (m *WorkshopBuilder) buildDebianBase(
 	bashrc *dagger.File,
-	backendBin, tini, goss, ttyd *dagger.File,
+	workshopBin, tini, goss, ttyd *dagger.File,
 ) *dagger.Container {
 	return dag.Container().
 		From("debian:bookworm-slim").
@@ -249,17 +212,17 @@ func (m *WorkshopBuilder) buildDebianBase(
 		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
-		WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/workshop", workshopBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/etc/workshop-platform.bashrc", bashrc).
 		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
 		WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
 		WithEntrypoint([]string{"/sbin/tini", "--"}).
-		WithDefaultArgs([]string{"/usr/local/bin/workshop-backend"})
+		WithDefaultArgs([]string{"/usr/local/bin/workshop"})
 }
 
 func (m *WorkshopBuilder) buildRockyBase(
 	bashrc *dagger.File,
-	backendBin, tini, goss, ttyd *dagger.File,
+	workshopBin, tini, goss, ttyd *dagger.File,
 ) *dagger.Container {
 	return dag.Container().
 		From("rockylinux:9").
@@ -270,12 +233,12 @@ func (m *WorkshopBuilder) buildRockyBase(
 		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
-		WithFile("/usr/local/bin/workshop-backend", backendBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/workshop", workshopBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/etc/workshop-platform.bashrc", bashrc).
 		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bashrc`}).
 		WithExec([]string{"mkdir", "-p", "/workshop/runtime"}).
 		WithEntrypoint([]string{"/sbin/tini", "--"}).
-		WithDefaultArgs([]string{"/usr/local/bin/workshop-backend"})
+		WithDefaultArgs([]string{"/usr/local/bin/workshop"})
 }
 
 // ── BuildWorkshop ─────────────────────────────────────────────────────────────
@@ -299,11 +262,11 @@ func (m *WorkshopBuilder) BuildWorkshop(
 		return nil, fmt.Errorf("compile workshop: %w", err)
 	}
 
-	// Build backend binary (includes embedded frontend)
-	backendBin := m.BuildBackend(ctx, src, "", "")
+	// Build workshop binary (includes embedded frontend)
+	workshopBin := m.BuildWorkshopBinary(ctx, src, "", "")
 
 	// Resolve base container for this workshop
-	base, err := m.resolveBaseContainer(ctx, src, compileOut.BaseImage, backendBin)
+	base, err := m.resolveBaseContainer(ctx, src, compileOut.BaseImage, workshopBin)
 	if err != nil {
 		return nil, fmt.Errorf("resolving base %q: %w", compileOut.BaseImage, err)
 	}
@@ -330,7 +293,7 @@ func (m *WorkshopBuilder) resolveBaseContainer(
 	ctx context.Context,
 	src *dagger.Directory,
 	baseImage string,
-	backendBin *dagger.File,
+	workshopBin *dagger.File,
 ) (*dagger.Container, error) {
 	known := map[string]string{
 		"workshop-base:ubuntu":                  "ubuntu",
@@ -341,7 +304,7 @@ func (m *WorkshopBuilder) resolveBaseContainer(
 		"ghcr.io/asocpro/workshop-base:debian": "debian",
 	}
 	if variant, ok := known[baseImage]; ok {
-		return m.buildBaseImage(ctx, src, variant, backendBin)
+		return m.buildBaseImage(ctx, src, variant, workshopBin)
 	}
 	// Custom base image — pull from registry
 	return dag.Container().From(baseImage), nil
@@ -390,8 +353,7 @@ func (m *WorkshopBuilder) runCompileWorkshop(ctx context.Context, src *dagger.Di
 		WithDirectory("/src", src).
 		WithWorkdir("/src").
 		WithExec([]string{
-			"go", "run", "./cmd/compile-workshop/",
-			"--workshop", workshopPath,
+			"go", "run", "./cmd/workshop/", "compile", workshopPath,
 		}).
 		Stdout(ctx)
 	if err != nil {
@@ -449,7 +411,7 @@ func (m *WorkshopBuilder) buildStepImage(
 	// override it (e.g. "cat /file") while still going through tini.
 	ctr = ctr.
 		WithEntrypoint([]string{"/sbin/tini", "--"}).
-		WithDefaultArgs([]string{"/usr/local/bin/workshop-backend"})
+		WithDefaultArgs([]string{"/usr/local/bin/workshop"})
 
 	return ctr
 }
@@ -605,48 +567,6 @@ func (m *WorkshopBuilder) DevFrontend(
 		})
 }
 
-// ── BuildCLI ──────────────────────────────────────────────────────────────────
-
-// BuildCLI cross-compiles the workshop CLI binary for the host platform.
-// Usage: dagger call build-cli --src . -o ./workshop && chmod +x ./workshop
-func (m *WorkshopBuilder) BuildCLI(
-	ctx context.Context,
-	// +defaultPath="/"
-	src *dagger.Directory,
-	// Target OS (default: linux)
-	// +optional
-	// +default="linux"
-	targetOS string,
-	// Target arch (default: amd64)
-	// +optional
-	// +default="amd64"
-	targetArch string,
-) *dagger.File {
-	if targetOS == "" {
-		targetOS = "linux"
-	}
-	if targetArch == "" {
-		targetArch = "amd64"
-	}
-	return dag.Container().
-		From("golang:1.24-alpine").
-		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod")).
-		WithMountedCache("/root/.cache/go-build", dag.CacheVolume("go-build")).
-		WithDirectory("/src", src).
-		WithWorkdir("/src").
-		WithEnvVariable("CGO_ENABLED", "0").
-		WithEnvVariable("GOOS", targetOS).
-		WithEnvVariable("GOARCH", targetArch).
-		WithExec([]string{"go", "mod", "download"}).
-		WithExec([]string{
-			"go", "build",
-			"-ldflags", "-s -w",
-			"-o", "/out/workshop",
-			"./cli/",
-		}).
-		File("/out/workshop")
-}
-
 // ── GoModTidy ─────────────────────────────────────────────────────────────────
 
 // GoModTidy runs go mod tidy and returns a directory containing the updated
@@ -733,10 +653,7 @@ func (m *WorkshopBuilder) BuildRelease(
 
 	for _, arch := range []string{"amd64", "arm64"} {
 		out = out.
-			WithFile("workshop-backend-linux-"+arch, m.BuildBackend(ctx, src, "linux", arch)).
-			WithFile("compile-workshop-linux-"+arch, m.BuildCompileWorkshop(ctx, src, "linux", arch)).
-			WithFile("workshop-setup-linux-"+arch, m.BuildSetup(ctx, src, "linux", arch)).
-			WithFile("workshop-cli-linux-"+arch, m.BuildCLI(ctx, src, "linux", arch)).
+			WithFile("workshop-linux-"+arch, m.BuildWorkshopBinary(ctx, src, "linux", arch)).
 			WithFile("ttyd-linux-"+arch, m.downloadTtydArch(arch)).
 			WithFile("goss-linux-"+arch, m.downloadGossArch(arch))
 	}

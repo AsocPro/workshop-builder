@@ -3,14 +3,16 @@ WORKSHOP_IMAGE   := localhost/hello-linux
 IMAGES_DIR       := /tmp/workshop-images
 BASE_IMAGES_DIR  := /tmp/base-images
 
-.PHONY: test build-backend base-images publish-base-images build-workshop build-cli tidy \
-	build-compile-workshop build-setup build-feature build-release
+.PHONY: test build base-images publish-base-images build-workshop tidy \
+	build-feature build-release
 
 test:
 	dagger call test --src .
 
-build-backend:
-	dagger call build-backend --src .
+# Cross-compile the single workshop binary (frontend embedded) for linux/amd64
+build:
+	dagger call build-workshop-binary --src . -o workshop
+	chmod +x workshop
 
 # Build all three base images and load them into Podman.
 base-images:
@@ -54,24 +56,9 @@ build-workshop:
 	@echo "Done. Images available:"
 	@podman images "$(WORKSHOP_IMAGE)" 2>/dev/null || true
 
-# Cross-compile the workshop CLI binary for linux/amd64
-build-cli:
-	dagger call build-cli --src . -o workshop
-	chmod +x workshop
-
 # Update go.mod and go.sum via Dagger (no local Go needed)
 tidy:
 	dagger call go-mod-tidy --src . -o .
-
-# Cross-compile compile-workshop for linux/amd64
-build-compile-workshop:
-	dagger call build-compile-workshop --src . -o compile-workshop
-	chmod +x compile-workshop
-
-# Cross-compile workshop-setup for linux/amd64
-build-setup:
-	dagger call build-setup --src . -o workshop-setup
-	chmod +x workshop-setup
 
 # Tarball the devcontainer feature
 build-feature:
