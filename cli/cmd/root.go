@@ -1,22 +1,9 @@
 package cmd
 
-import (
-	"os"
+import "github.com/spf13/cobra"
 
-	"github.com/spf13/cobra"
-)
-
-var rootCmd = &cobra.Command{
-	Use:   "workshop",
-	Short: "Workshop platform CLI",
-}
-
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
-}
-
-func init() {
-	rootCmd.AddCommand(runCmd)
+// RunCommand returns the `run <image>` command for mounting under the unified
+// `workshop` umbrella.
+func RunCommand() *cobra.Command {
+	return runCmd
 }
