@@ -25,7 +25,7 @@ func (m *WorkshopBuilder) Test(
 		WithDirectory("/src", src).
 		WithWorkdir("/src").
 		WithExec([]string{"go", "build", "./..."}).
-		WithExec([]string{"go", "test", "-v", "./pkg/workshop/...", "./backend/..."}).
+		WithExec([]string{"go", "test", "-v", "./pkg/workshop/...", "./backend/...", "./cmd/..."}).
 		Stdout(ctx)
 }
 
