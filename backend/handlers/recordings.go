@@ -1,11 +1,44 @@
 package handlers
 
-import "net/http"
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/asocpro/workshop-builder/backend/store"
+)
 
 func (h *Handlers) ListRecordings(w http.ResponseWriter, r *http.Request) {
-	notImplemented(w, r)
+	recs, err := store.ListRecordings(h.RuntimeDir)
+	if err != nil {
+		http.Error(w, "listing recordings", http.StatusInternalServerError)
+		return
+	}
+	if recs == nil {
+		recs = []store.RecordingInfo{}
+	}
+	writeJSON(w, http.StatusOK, recs)
 }
 
 func (h *Handlers) GetRecording(w http.ResponseWriter, r *http.Request) {
-	notImplemented(w, r)
+	name := chi.URLParam(r, "filename")
+	if !store.ValidRecordingName(name) {
+		http.Error(w, "invalid recording name", http.StatusBadRequest)
+		return
+	}
+	f, err := os.Open(filepath.Join(h.RuntimeDir, name))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-asciicast")
+	http.ServeContent(w, r, name, fi.ModTime(), f)
 }

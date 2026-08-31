@@ -91,7 +91,7 @@ func RunStandalone(opts StandaloneOptions) error {
 	)
 	ttydMgr.Start()
 
-	var handler http.Handler = NewServer(meta, st, "", cmdLog, "standalone")
+	var handler http.Handler = NewServer(meta, st, "", cmdLog, "standalone", runtimeDir)
 	if opts.AuthUser != "" {
 		handler = BasicAuth(opts.AuthUser, authPass, handler)
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/asocpro/workshop-builder/backend/store"
 )
 
-func NewServer(meta *store.Metadata, st *store.State, managementURL string, cmdLog *store.CommandLog, mode string) http.Handler {
+func NewServer(meta *store.Metadata, st *store.State, managementURL string, cmdLog *store.CommandLog, mode, runtimeDir string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -32,7 +32,7 @@ func NewServer(meta *store.Metadata, st *store.State, managementURL string, cmdL
 		})
 	})
 
-	h := handlers.New(meta, st, managementURL, cmdLog, mode)
+	h := handlers.New(meta, st, managementURL, cmdLog, mode, runtimeDir)
 
 	// Student API
 	r.Get("/api/state", h.GetState)

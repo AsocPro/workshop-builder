@@ -53,7 +53,7 @@ func RunContainer() {
 	ttydMgr.Start()
 
 	// Create and start HTTP server
-	srv := NewServer(meta, st, managementURL, cmdLog, mode)
+	srv := NewServer(meta, st, managementURL, cmdLog, mode, runtimeDir)
 
 	addr := ":" + port
 	fmt.Printf("Workshop backend listening on %s\n", addr)

@@ -31,7 +31,7 @@ func newTestServerAt(t *testing.T, root, mode string) http.Handler {
 	}
 	st := store.NewState(meta)
 	cmdLog := store.NewCommandLog(filepath.Join(root, "runtime", "command-log.jsonl"))
-	return NewServer(meta, st, "http://localhost:9090", cmdLog, mode)
+	return NewServer(meta, st, "http://localhost:9090", cmdLog, mode, filepath.Join(root, "runtime"))
 }
 
 func TestGetState(t *testing.T) {
