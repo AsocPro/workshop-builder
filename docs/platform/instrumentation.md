@@ -114,7 +114,8 @@ The recording uses [asciicast v3 format](https://docs.asciinema.org/manual/ascii
 ```
 
 - First line: header with terminal dimensions and metadata
-- Subsequent lines: `[elapsed_seconds, event_type, data]`
+- Subsequent lines: `[interval_seconds, event_type, data]` — in asciicast v3 the
+  time is the interval since the previous event, not elapsed time since start
 - `"o"` = output (terminal → screen), `"i"` = input (keyboard → terminal)
 
 ### File Serving
