@@ -35,7 +35,7 @@ if [ "$VERSION" = "latest" ]; then
         | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
 fi
 
-BINARIES="workshop ttyd goss"
+BINARIES="workshop ttyd goss asciinema"
 
 echo "Installing workshop standalone tools ${VERSION} (${ARCH}) to ${PREFIX}..."
 for BINARY in $BINARIES; do

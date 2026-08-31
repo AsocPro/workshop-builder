@@ -162,15 +162,16 @@ func (m *WorkshopBuilder) buildBaseImage(
 	tini := m.downloadTini(ctx)
 	goss := m.downloadGoss(ctx)
 	ttyd := m.downloadTtyd(ctx)
+	asciinema := m.downloadAsciinema(ctx)
 	bashrc := src.File("backend/instrumentation/workshop-platform.bashrc")
 
 	switch variant {
 	case "ubuntu":
-		return m.buildUbuntuBase(bashrc, workshopBin, tini, goss, ttyd), nil
+		return m.buildUbuntuBase(bashrc, workshopBin, tini, goss, ttyd, asciinema), nil
 	case "rocky":
-		return m.buildRockyBase(bashrc, workshopBin, tini, goss, ttyd), nil
+		return m.buildRockyBase(bashrc, workshopBin, tini, goss, ttyd, asciinema), nil
 	case "debian":
-		return m.buildDebianBase(bashrc, workshopBin, tini, goss, ttyd), nil
+		return m.buildDebianBase(bashrc, workshopBin, tini, goss, ttyd, asciinema), nil
 	default:
 		return nil, fmt.Errorf("unknown base image variant: %s", variant)
 	}
@@ -178,7 +179,7 @@ func (m *WorkshopBuilder) buildBaseImage(
 
 func (m *WorkshopBuilder) buildUbuntuBase(
 	bashrc *dagger.File,
-	workshopBin, tini, goss, ttyd *dagger.File,
+	workshopBin, tini, goss, ttyd, asciinema *dagger.File,
 ) *dagger.Container {
 	return dag.Container().
 		From("ubuntu:24.04").
@@ -190,6 +191,7 @@ func (m *WorkshopBuilder) buildUbuntuBase(
 		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/asciinema", asciinema, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/workshop", workshopBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/etc/workshop-platform.bashrc", bashrc).
 		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
@@ -200,7 +202,7 @@ func (m *WorkshopBuilder) buildUbuntuBase(
 
 func (m *WorkshopBuilder) buildDebianBase(
 	bashrc *dagger.File,
-	workshopBin, tini, goss, ttyd *dagger.File,
+	workshopBin, tini, goss, ttyd, asciinema *dagger.File,
 ) *dagger.Container {
 	return dag.Container().
 		From("debian:bookworm-slim").
@@ -212,6 +214,7 @@ func (m *WorkshopBuilder) buildDebianBase(
 		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/asciinema", asciinema, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/workshop", workshopBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/etc/workshop-platform.bashrc", bashrc).
 		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bash.bashrc`}).
@@ -222,7 +225,7 @@ func (m *WorkshopBuilder) buildDebianBase(
 
 func (m *WorkshopBuilder) buildRockyBase(
 	bashrc *dagger.File,
-	workshopBin, tini, goss, ttyd *dagger.File,
+	workshopBin, tini, goss, ttyd, asciinema *dagger.File,
 ) *dagger.Container {
 	return dag.Container().
 		From("rockylinux:9").
@@ -233,6 +236,7 @@ func (m *WorkshopBuilder) buildRockyBase(
 		WithFile("/sbin/tini", tini, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/goss", goss, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/ttyd", ttyd, dagger.ContainerWithFileOpts{Permissions: 0755}).
+		WithFile("/usr/local/bin/asciinema", asciinema, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/usr/local/bin/workshop", workshopBin, dagger.ContainerWithFileOpts{Permissions: 0755}).
 		WithFile("/etc/workshop-platform.bashrc", bashrc).
 		WithExec([]string{"sh", "-c", `echo 'source /etc/workshop-platform.bashrc' >> /etc/bashrc`}).
@@ -635,6 +639,21 @@ func (m *WorkshopBuilder) downloadTtydArch(arch string) *dagger.File {
 	return dag.HTTP("https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd." + ttydArch)
 }
 
+func (m *WorkshopBuilder) downloadAsciinema(_ context.Context) *dagger.File {
+	return m.downloadAsciinemaArch("amd64")
+}
+
+func (m *WorkshopBuilder) downloadAsciinemaArch(arch string) *dagger.File {
+	// asciinema 3.x ships prebuilt static binaries. amd64 has a musl build;
+	// arm64 ships the gnu build. Vendored like ttyd/goss so recording reaches
+	// container, standalone, and devcontainer modes from one pinned version.
+	asset := map[string]string{
+		"amd64": "asciinema-x86_64-unknown-linux-musl",
+		"arm64": "asciinema-aarch64-unknown-linux-gnu",
+	}[arch]
+	return dag.HTTP("https://github.com/asciinema/asciinema/releases/download/v3.2.1/" + asset)
+}
+
 // ── Release ───────────────────────────────────────────────────────────────────
 
 // BuildRelease builds all release assets for both architectures: our Go
@@ -655,7 +674,8 @@ func (m *WorkshopBuilder) BuildRelease(
 		out = out.
 			WithFile("workshop-linux-"+arch, m.BuildWorkshopBinary(ctx, src, "linux", arch)).
 			WithFile("ttyd-linux-"+arch, m.downloadTtydArch(arch)).
-			WithFile("goss-linux-"+arch, m.downloadGossArch(arch))
+			WithFile("goss-linux-"+arch, m.downloadGossArch(arch)).
+			WithFile("asciinema-linux-"+arch, m.downloadAsciinemaArch(arch))
 	}
 
 	return out.
