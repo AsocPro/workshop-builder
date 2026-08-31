@@ -38,6 +38,12 @@ export interface Command {
   exit: number
 }
 
+export interface RecordingInfo {
+  filename: string
+  startTime: string
+  size: number
+}
+
 async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, options)
   if (!res.ok) {
@@ -75,6 +81,16 @@ export const api = {
   },
 
   getCommands(limit = 50): Promise<Command[]> {
-    return fetchJSON(`/api/commands?limit=${limit}`)
+    return fetchJSON<{ commands: Command[]; total: number }>(
+      `/api/commands?limit=${limit}`,
+    ).then(r => r.commands)
+  },
+
+  listRecordings(): Promise<RecordingInfo[]> {
+    return fetchJSON('/api/recordings')
+  },
+
+  recordingURL(filename: string): string {
+    return `/api/recordings/${encodeURIComponent(filename)}`
   },
 }
