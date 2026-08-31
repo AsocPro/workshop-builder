@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 func (h *Handlers) ListRecordings(w http.ResponseWriter, r *http.Request) {
 	recs, err := store.ListRecordings(h.RuntimeDir)
 	if err != nil {
+		log.Printf("ListRecordings: %v", err)
 		http.Error(w, "listing recordings", http.StatusInternalServerError)
 		return
 	}
@@ -36,7 +38,7 @@ func (h *Handlers) GetRecording(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		http.NotFound(w, r)
+		http.Error(w, "stat recording", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-asciicast")
