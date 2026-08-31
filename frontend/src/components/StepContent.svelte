@@ -4,7 +4,7 @@
   import { renderMarkdown, processMermaid } from '../lib/markdown.js'
   import ValidateButton from './ValidateButton.svelte'
   import HelpPanel from './HelpPanel.svelte'
-  import Terminal from './Terminal.svelte'
+  import RightPanel from './RightPanel.svelte'
 
   let {
     stepId,
@@ -133,8 +133,8 @@
     {/if}
   </div>
 
-  <!-- Right: terminal (full height) -->
+  <!-- Right: tabbed panel (terminal / commands / recordings) -->
   <div class="w-1/2 h-full">
-    <Terminal />
+    <RightPanel />
   </div>
 </div>
