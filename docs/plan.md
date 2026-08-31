@@ -230,7 +230,7 @@ The authoring and build pipeline. These produce the artifacts consumed by the ru
 - [x] LLM help API is step-scoped — `POST /api/steps/:id/llm/help`, `GET /api/steps/:id/llm/history`.
 - [ ] Define how the backend signals cluster health to the frontend (part of `/api/state` or separate endpoint).
 - [ ] Define LLM capability flag — how does the frontend know LLM is configured? Include in `/api/state` or a `/api/capabilities` endpoint.
-- [ ] Define command history polling behavior — periodic poll or on-demand fetch?
+- [x] Define command history polling behavior — periodic poll (client polls `GET /api/commands` ~2s while the Commands tab is visible; endpoint itself returns an on-demand snapshot).
 
 ---
 
@@ -258,8 +258,8 @@ The authoring and build pipeline. These produce the artifacts consumed by the ru
 - [x] Define UX distinction between view step content (no restart) and switch workspace (image swap + restart) — student UI is view-only.
 - [ ] Design the LLM help panel component (layout, streaming render, history display).
 - [ ] Design the non-linear navigation UI (step list sidebar, completion indicators, group display).
-- [ ] Define command history display — shown in UI or LLM-only context?
-- [ ] Define session recordings UI — how does the student access and play recordings?
+- [x] Define command history display — shown in UI as a Commands tab in the right-hand panel (periodic poll).
+- [x] Define session recordings UI — Recordings tab lists sessions from `/api/recordings` and replays the selected one via the embedded asciinema-player.
 
 ---
 
@@ -431,10 +431,8 @@ The authoring and build pipeline. These produce the artifacts consumed by the ru
 
 **Remaining open items before single-user milestone:**
 - Backend: cluster health signal + LLM capability flag in `/api/state` or `/api/capabilities`
-- Backend: command history poll vs on-demand
 - CLI: `extraContainers` lifecycle across step transitions
 - CLI: port auto-assignment and display in management UI
 - CLI: full command tree (`workshop run`, `workspace reset`, etc.)
 - Frontend: LLM help panel component design
 - Frontend: step navigation sidebar + completion UI design
-- Frontend: recordings UI

@@ -41,7 +41,7 @@ detail lives in the `plans/mNN` file, this table just rolls up.
 | Help panel (static hints/explain/solve) | [llm-help](docs/platform/llm-help.md) | 🟡 | [m11](plans/m10-m11-commands-help.md) | Serves baked markdown over SSE; **not** a live LLM |
 | State event log | [flat-file-artifact](docs/artifact/flat-file-artifact.md) | ✅ | — | Append-only; state in-memory, no persistence |
 | In-place step transition (`activate`) | [standalone](docs/platform/standalone-mode.md) | ✅ | [m13](plans/m13-devcontainer-feature.md)/[m14](plans/m14-standalone-mode.md) | Standalone/devcontainer modes |
-| Session recording (asciinema) | [instrumentation](docs/platform/instrumentation.md) | 🟡 | — | `/api/recordings*` handlers return `notImplemented` — playback API stubbed |
+| Session recording (asciinema) | [instrumentation](docs/platform/instrumentation.md) | ✅ | — | Per-session `session-<ts>.cast` capture via asciinema-wrapped ttyd; `/api/recordings` list + range-serve; asciinema-player UI |
 
 ## Delivery Modes
 
@@ -82,5 +82,4 @@ not yet implemented:
 - Aggregation (Vector/Postgres) + instructor dashboard
 - Live LLM help, Builder GUI
 
-Two partials to be aware of: **help panel** is static markdown (not a live LLM), and
-**session recording** capture may run but the playback API is stubbed.
+One partial to be aware of: **help panel** is static markdown (not a live LLM).

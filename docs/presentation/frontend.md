@@ -19,7 +19,7 @@ Workshop participants following a guided tutorial.
 - Step content navigation (view any step's tutorial)
 - Resume progress from last checkpoint
 - Markdown tutorial content display
-- Embedded terminal (WebSocket to ttyd, proxied through backend)
+- Embedded terminal (WebSocket to ttyd, proxied through backend), alongside Commands and Recordings tabs in a tabbed right-hand panel — see [Terminal, Command History & Recordings](#terminal-command-history--recordings)
 - Validation feedback (did the student complete the step correctly?)
 - LLM help panel (chat-like interface for contextual assistance, when configured)
 - Cluster status indicator (optional — shown when backend reports cluster mode is enabled)
@@ -36,6 +36,16 @@ All state management, reset logic, and validation lives in the backend. The fron
 The frontend does not talk to the Kubernetes API or any external service directly.
 
 **Step lifecycle (reset, image swap, container restart) is not managed by the student UI.** That responsibility belongs to the CLI (Docker mode) or the operator/instructor tooling (K8s mode). The student UI is read-only with respect to workspace lifecycle.
+
+---
+
+## Terminal, Command History & Recordings
+
+The right-hand panel is tabbed: **Terminal | Commands | Recordings**.
+
+- **Terminal** — the embedded ttyd `<iframe>`. It stays mounted across tab switches (hidden, not unmounted/reconnected), so switching to Commands or Recordings and back does not drop or restart the terminal session.
+- **Commands** — shows shell command history, populated by client-side periodic polling (~2s) of `GET /api/commands` while the tab is visible.
+- **Recordings** — lists past terminal sessions from `GET /api/recordings` and replays a selected one via the embedded [asciinema-player](https://docs.asciinema.org/manual/player/) (npm package, floor `^3.10` for asciicast v3 support; currently resolves to 3.17.0), streamed from `GET /api/recordings/{filename}`.
 
 ---
 
@@ -107,16 +117,16 @@ Response shape (per-test results) drives the validation feedback panel. After a 
 
 | Method | Path | When called | Notes |
 |---|---|---|---|
-| `GET` | `/api/commands` | Periodically or on demand | Recent shell commands from the terminal session; used for display and LLM context |
+| `GET` | `/api/commands` | Client periodic poll (~2s) while the Commands tab is visible | Recent shell commands from the terminal session; returns an on-demand snapshot, not a stream |
 
-Supports pagination. The frontend may poll this or display it on demand — TBD.
+Supports pagination.
 
 #### Session Recordings
 
 | Method | Path | When called | Notes |
 |---|---|---|---|
-| `GET` | `/api/recordings` | When student opens recordings view | Lists available `.cast` files with start timestamps |
-| `GET` | `/api/recordings/:filename` | When student plays a recording | Streams asciicast v2 file with HTTP Range support for seeking |
+| `GET` | `/api/recordings` | When student opens the Recordings tab | Lists available `.cast` files with start timestamps, newest first |
+| `GET` | `/api/recordings/:filename` | When student plays a recording | Streams asciicast v3 file with HTTP Range support for seeking; filename validated against `^session-[0-9TZ]+\.cast$` |
 
 #### LLM Help
 

@@ -21,7 +21,7 @@ Every base image contains:
 | tini | `/sbin/tini` | PID 1 init — zombie reaping, signal forwarding |
 | workshop | `/usr/local/bin/workshop` | Runtime engine — web UI, API, terminal proxy, recording |
 | goss | `/usr/local/bin/goss` | Step validation — tests student's container state |
-| asciinema | `/usr/bin/asciinema` | Terminal recording — full session capture with replay |
+| asciinema | `/usr/local/bin/asciinema` | Terminal recording — full session capture with replay |
 | workshop-platform.bashrc | `/etc/workshop-platform.bashrc` | Shell instrumentation — PROMPT_COMMAND for command logging |
 | runtime directory | `/workshop/runtime/` | Pre-created in image; populated at runtime with JSONL logs, recording, state events |
 
@@ -123,7 +123,7 @@ The following components must be present in the custom base image for the worksh
 | tini | `/sbin/tini` | PID 1 init — zombie reaping, signal forwarding | Static binary; download from [tini releases](https://github.com/krallin/tini/releases) |
 | workshop | `/usr/local/bin/workshop` | Runtime engine — web UI, API, terminal proxy | Static Go binary with embedded assets; provided by platform releases |
 | goss | `/usr/local/bin/goss` | Step validation | Static binary; download from [goss releases](https://github.com/goss-org/goss/releases). Only required if any step has a `goss.yaml` file. |
-| asciinema | `/usr/bin/asciinema` | Terminal session recording | Python package or static build. Only required if session recording is enabled. |
+| asciinema | `/usr/local/bin/asciinema` | Terminal session recording | Vendored pinned static binary (v3.2.1), installed by the Dagger base-image build — not a distro/Python package. Only required if session recording is enabled. |
 | workshop-platform.bashrc | `/etc/workshop-platform.bashrc` | Shell instrumentation for command logging | Plain shell script; provided by platform releases |
 
 Additionally, the custom base image must:
@@ -161,7 +161,7 @@ Copy platform binaries from release artifacts:
   → tini            → /sbin/tini
   → workshop          → /usr/local/bin/workshop
   → goss            → /usr/local/bin/goss
-  → asciinema       → /usr/bin/asciinema
+  → asciinema       → /usr/local/bin/asciinema
   → workshop-platform.bashrc → /etc/workshop-platform.bashrc
       │
       ▼

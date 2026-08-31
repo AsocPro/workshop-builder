@@ -96,7 +96,16 @@ The shell's `PROMPT_COMMAND` hook (from `/etc/workshop-platform.bashrc`) writes 
 - Maintains an in-memory buffer of recent commands for LLM context assembly
 - Serves command history via `GET /api/commands` for display in the student UI
 
+`GET /api/commands` returns an on-demand snapshot of the buffer (not a stream); the student UI polls it periodically (~2s) while the Commands tab is visible.
+
 See [Instrumentation](./instrumentation.md) for the shell hook implementation.
+
+### Session Recordings
+
+The backend also serves the per-session `.cast` files written by asciinema (see [Instrumentation](./instrumentation.md)):
+
+- `GET /api/recordings` — lists recorded sessions, newest first
+- `GET /api/recordings/{filename}` — serves a `session-<ts>.cast` file with HTTP Range support for player seeking; the filename is validated against `^session-[0-9TZ]+\.cast$` before serving
 
 ### Web UI Serving
 
