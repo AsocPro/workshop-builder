@@ -85,7 +85,7 @@ func RunStandalone(opts StandaloneOptions) error {
 	cmdLog.Start()
 
 	// Instrumentation is scoped: only this shell sources the logging hook.
-	ttydMgr := process.NewTTYDManagerWithShell(7681,
+	ttydMgr := process.NewTTYDManagerWithShell(7681, runtimeDir,
 		[]string{"/bin/bash", "--rcfile", rcfile, "-i"},
 		map[string]string{"WORKSHOP_ROOT": root},
 	)

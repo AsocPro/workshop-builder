@@ -49,7 +49,7 @@ func RunContainer() {
 	cmdLog.Start()
 
 	// Spawn ttyd (terminal)
-	ttydMgr := process.NewTTYDManager(7681)
+	ttydMgr := process.NewTTYDManager(7681, runtimeDir)
 	ttydMgr.Start()
 
 	// Create and start HTTP server
