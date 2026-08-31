@@ -80,7 +80,7 @@ ttyd <options> -- asciinema rec --stdin /workshop/runtime/session-<timestamp>.ca
 
 - `--stdin` captures input for full replay fidelity
 - Each new connection gets a fresh file named with the ISO 8601 start time (e.g. `session-20250315T142000Z.cast`) — no appending, no timestamp discontinuities
-- The resulting files are in [asciicast v2 format](https://docs.asciinema.org/manual/asciicast/v2/)
+- The resulting files are in [asciicast v3 format](https://docs.asciinema.org/manual/asciicast/v3/)
 
 The backend:
 - Monitors ttyd; restarts it if it exits unexpectedly

@@ -105,7 +105,7 @@ Asciinema is a **vendored static binary** (pinned v3.2.1), installed at `/usr/lo
 The recording uses [asciicast v3 format](https://docs.asciinema.org/manual/asciicast/v3/):
 
 ```
-{"version": 2, "width": 120, "height": 40, "timestamp": 1710511200, "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}}
+{"version": 3, "width": 120, "height": 40, "timestamp": 1710511200, "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}}
 [0.5, "o", "$ "]
 [1.2, "i", "kubectl get pods\r"]
 [1.3, "o", "kubectl get pods\r\n"]
