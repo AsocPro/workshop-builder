@@ -36,7 +36,7 @@ detail lives in the `plans/mNN` file, this table just rolls up.
 | Step list + markdown content | [frontend](docs/presentation/frontend.md) | ✅ | [m5](plans/m5-frontend.md)/[m6](plans/m6-m7-embed-terminal.md) | |
 | Navigation enforcement (linear / free / guided + `requires`) | [backend-service](docs/platform/backend-service.md) | ✅ | — | `backend/store/state.go` |
 | Web terminal (ttyd) | [instrumentation](docs/platform/instrumentation.md) | ✅ | [m7](plans/m6-m7-embed-terminal.md) | ttyd proxy + WS |
-| goss validation → completion | [backend-service](docs/platform/backend-service.md) | ✅ | [m8](plans/m8-goss-validation.md) | Marks step complete on pass |
+| goss validation → completion | [backend-service](docs/platform/backend-service.md) | ✅ | [m8](plans/m8-goss-validation.md) | Marks step complete on pass. `/validate` returns 403 for steps not yet accessible (same rule as navigate); goss runs with a 30s timeout (`WORKSHOP_GOSS_TIMEOUT`); timeouts/parse errors log a `goss_error` state event |
 | Command logging | [instrumentation](docs/platform/instrumentation.md) | ✅ | [m10](plans/m10-m11-commands-help.md) | PROMPT_COMMAND → `command-log.jsonl` → `/api/commands` |
 | Help panel (static hints/explain/solve) | [llm-help](docs/platform/llm-help.md) | 🟡 | [m11](plans/m10-m11-commands-help.md) | Serves baked markdown over SSE; **not** a live LLM |
 | State event log | [flat-file-artifact](docs/artifact/flat-file-artifact.md) | ✅ | — | Append-only; state in-memory, no persistence |

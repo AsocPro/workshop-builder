@@ -24,7 +24,7 @@
         onSuccess(result)
       }
     } catch (e) {
-      errorMsg = String(e)
+      errorMsg = e instanceof Error ? e.message : String(e)
     } finally {
       loading = false
     }
