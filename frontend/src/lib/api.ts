@@ -24,6 +24,7 @@ export interface StepListItem {
 export interface ValidateResult {
   passed: boolean
   checks: CheckResult[]
+  error?: string
 }
 
 export interface CheckResult {
@@ -70,8 +71,20 @@ export const api = {
     return fetchJSON(`/api/steps/${id}/activate`, { method: 'POST' })
   },
 
-  validate(id: string): Promise<ValidateResult> {
-    return fetchJSON(`/api/steps/${id}/validate`, { method: 'POST' })
+  async validate(id: string): Promise<ValidateResult> {
+    const res = await fetch(`/api/steps/${id}/validate`, { method: 'POST' })
+    if (!res.ok) {
+      // The server explains why in {error}; fall back to the status line.
+      let msg = `validate ${id}: ${res.status} ${res.statusText}`
+      try {
+        const body = await res.json()
+        if (body?.error) msg = body.error
+      } catch {
+        // non-JSON body (e.g. 404 text); keep the fallback
+      }
+      throw new Error(msg)
+    }
+    return res.json()
   },
 
   getCommands(limit = 50): Promise<Command[]> {

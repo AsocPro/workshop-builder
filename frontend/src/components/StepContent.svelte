@@ -23,6 +23,7 @@
   let html = $state('')
   let loading = $state(false)
   let error = $state<string | null>(null)
+  let completeError = $state<string | null>(null)
   let contentEl: HTMLElement
   let lastResult = $state<ValidateResult | null>(null)
 
@@ -48,6 +49,16 @@
       processMermaid(contentEl)
     }
   })
+
+  async function markComplete() {
+    completeError = null
+    try {
+      await api.validate(stepId)
+      onValidated()
+    } catch (e) {
+      completeError = e instanceof Error ? e.message : String(e)
+    }
+  }
 </script>
 
 <div class="flex flex-1 overflow-hidden">
@@ -120,10 +131,13 @@
           {:else if !step.completed}
             <button
               class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded font-medium text-sm transition-colors"
-              onclick={async () => { await api.validate(stepId); onValidated() }}
+              onclick={markComplete}
             >
               Mark as Complete
             </button>
+            {#if completeError}
+              <p class="text-red-400 text-sm">{completeError}</p>
+            {/if}
           {/if}
         </div>
 
